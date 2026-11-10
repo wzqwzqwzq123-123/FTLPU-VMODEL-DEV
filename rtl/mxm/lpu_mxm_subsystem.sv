@@ -18,11 +18,11 @@ module lpu_mxm_subsystem #(
 
 	input logic program_valid_i,
 	output logic program_ready_o,
-	input logic [2:0] program_command_i,
+	input logic [2:0] program_control_i,
 	input logic [3:0] program_target_kind_i,
 	input logic [16:0] program_address_i,
 	input logic [127:0] program_data_i,
-	input logic [15:0] program_strb_i,
+	input logic [3:0] program_strb_i,
 	input logic program_last_i,
 	output logic program_error_o,
 
@@ -126,11 +126,12 @@ module lpu_mxm_subsystem #(
 	logic [3*32-1:0] frontend_schedule_cycle;
 
 	assign clear_fire_w = program_valid_i && program_ready_o &&
-		((program_command_i == PROGRAM_LOAD_CLEAR) || (program_command_i == PROGRAM_LOAD_ABORT));
+		((program_control_i == PROGRAM_LOAD_CLEAR) || (program_control_i == PROGRAM_LOAD_ABORT));
 	assign write_fire_w = program_valid_i && program_ready_o &&
-		(program_command_i == PROGRAM_LOAD_WRITE);
+		(program_control_i == PROGRAM_LOAD_WRITE) &&
+		(program_strb_i == 4'b1111) && (program_address_i < IMEM_DEPTH);
 	assign prime_fire_w = program_valid_i && program_ready_o &&
-		(program_command_i == PROGRAM_LOAD_PRIME);
+		(program_control_i == PROGRAM_LOAD_PRIME);
 	assign frontend_rst_ni = rst_ni && !program_reset_i && !clear_fire_w;
 	// Stream order is Load, Dequant, Compute. Each stream may independently
 	// freeze its Queue-local time at a QCTL boundary.
@@ -156,24 +157,24 @@ module lpu_mxm_subsystem #(
 	// Program writes target one of the three instruction streams owned by this MXM.
 	always_comb begin
 		case(program_target_kind_i)
-			PROGRAM_TARGET_MXM_LOAD: program_ready_o = program_command_i == PROGRAM_LOAD_PRIME ?
+			PROGRAM_TARGET_MXM_LOAD: program_ready_o = program_control_i == PROGRAM_LOAD_PRIME ?
 				load_prime_ready : load_load_ready;
-			PROGRAM_TARGET_MXM_DEQUANT: program_ready_o = program_command_i == PROGRAM_LOAD_PRIME ?
+			PROGRAM_TARGET_MXM_DEQUANT: program_ready_o = program_control_i == PROGRAM_LOAD_PRIME ?
 				dequant_prime_ready : dequant_load_ready;
-			PROGRAM_TARGET_MXM_COMPUTE: program_ready_o = program_command_i == PROGRAM_LOAD_PRIME ?
+			PROGRAM_TARGET_MXM_COMPUTE: program_ready_o = program_control_i == PROGRAM_LOAD_PRIME ?
 				compute_prime_ready : compute_load_ready;
-			default: program_ready_o = (program_command_i == PROGRAM_LOAD_CLEAR) ||
-				(program_command_i == PROGRAM_LOAD_ABORT);
+			default: program_ready_o = (program_control_i == PROGRAM_LOAD_CLEAR) ||
+				(program_control_i == PROGRAM_LOAD_ABORT);
 		endcase
-		if((program_command_i == PROGRAM_LOAD_CLEAR) || (program_command_i == PROGRAM_LOAD_ABORT))begin
+		if((program_control_i == PROGRAM_LOAD_CLEAR) || (program_control_i == PROGRAM_LOAD_ABORT))begin
 			program_ready_o = 1'b1;
 		end
 		program_error_o = program_valid_i && program_ready_o &&
 			(((program_target_kind_i < PROGRAM_TARGET_MXM_LOAD) ||
 			  (program_target_kind_i > PROGRAM_TARGET_MXM_COMPUTE)) ||
-			 ((program_command_i == PROGRAM_LOAD_WRITE) &&
-			  ((program_strb_i != 16'hffff) || (program_address_i >= IMEM_DEPTH))) ||
-			 (program_command_i > PROGRAM_LOAD_ABORT));
+			 ((program_control_i == PROGRAM_LOAD_WRITE) &&
+			  ((program_strb_i != 4'b1111) || (program_address_i >= IMEM_DEPTH))) ||
+			 (program_control_i > PROGRAM_LOAD_ABORT));
 	end
 
 	lpu_mxm_local_imem_frontend #(

@@ -14,17 +14,10 @@ module lpu_mem_column #(
   output logic [4*6-1:0] tile_tx_stream_o,
   output logic [4*64-1:0] tile_tx_data_o,
   output logic [3:0] tile_tx_last_o,
-  output logic [3:0] tile_fault_o,
-
-  input  logic host_write_valid_i,
-  input  logic [1:0] host_tile_i,
-  input  logic [15:0] host_address_i,
-  input  logic [63:0] host_write_data_i,
-  output logic [63:0] host_read_data_o
+  output logic [3:0] tile_fault_o
 );
   logic [3:0] instruction_valid;
   logic [4*47-1:0] instruction_payload;
-  logic [4*64-1:0] host_read_data;
 
   lpu_control_pipeline #(.WIDTH(47), .ROWS(4)) u_control (
     .clk_i,
@@ -44,7 +37,6 @@ module lpu_mem_column #(
       logic [63:0] tx_data;
       logic tx_last;
       logic fault;
-      logic [63:0] host_read;
 
       lpu_mem_tile_slice #(
         .DEPTH_ROWS(DEPTH_ROWS),
@@ -61,11 +53,7 @@ module lpu_mem_column #(
         .tx_stream_o(tx_stream),
         .tx_data_o(tx_data),
         .tx_last_o(tx_last),
-        .fault_o(fault),
-        .host_write_valid_i(host_write_valid_i && (host_tile_i == TILE_INDEX)),
-        .host_address_i,
-        .host_write_data_i,
-        .host_read_data_o(host_read)
+        .fault_o(fault)
       );
 
       assign tile_rx_consume_o[TILE_INDEX*64 +: 64] = rx_consume;
@@ -74,10 +62,6 @@ module lpu_mem_column #(
       assign tile_tx_data_o[TILE_INDEX*64 +: 64] = tx_data;
       assign tile_tx_last_o[TILE_INDEX] = tx_last;
       assign tile_fault_o[TILE_INDEX] = fault;
-      assign host_read_data[TILE_INDEX*64 +: 64] = host_read;
     end
   endgenerate
-
-  always_comb
-    host_read_data_o = host_read_data[host_tile_i*64 +: 64];
 endmodule

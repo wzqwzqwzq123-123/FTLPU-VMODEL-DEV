@@ -20,13 +20,6 @@ module lpu_mem_hemisphere #(
   output logic [4*32-1:0] west_edge_valid_o,
   output logic [4*32*64-1:0] west_edge_data_o,
 
-  input  logic host_write_valid_i,
-  input  logic [5:0] host_column_i,
-  input  logic [1:0] host_tile_i,
-  input  logic [15:0] host_address_i,
-  input  logic [63:0] host_write_data_i,
-  output logic [63:0] host_read_data_o,
-
   output logic [52*4-1:0] mem_fault_o,
   output logic conflict_o
 );
@@ -56,7 +49,6 @@ module lpu_mem_hemisphere #(
   logic [COLUMNS*TILES*64-1:0] column_tx_data;
   logic [COLUMNS*TILES-1:0] column_tx_last;
   logic [COLUMNS*TILES-1:0] column_fault;
-  logic [COLUMNS*64-1:0] host_read_data;
   logic conflict_d;
 
   generate
@@ -68,7 +60,6 @@ module lpu_mem_hemisphere #(
       logic [TILES*64-1:0] tx_data;
       logic [TILES-1:0] tx_last;
       logic [TILES-1:0] fault;
-      logic [63:0] host_read;
 
       lpu_mem_column #(
         .DEPTH_ROWS(DEPTH_ROWS),
@@ -85,12 +76,7 @@ module lpu_mem_hemisphere #(
         .tile_tx_stream_o(tx_stream),
         .tile_tx_data_o(tx_data),
         .tile_tx_last_o(tx_last),
-        .tile_fault_o(fault),
-        .host_write_valid_i(host_write_valid_i && (host_column_i == COLUMN_INDEX)),
-        .host_tile_i,
-        .host_address_i,
-        .host_write_data_i,
-        .host_read_data_o(host_read)
+        .tile_fault_o(fault)
       );
 
       assign column_rx_consume[COLUMN_INDEX*TILES*64 +: TILES*64] = rx_consume;
@@ -99,7 +85,6 @@ module lpu_mem_hemisphere #(
       assign column_tx_data[COLUMN_INDEX*TILES*64 +: TILES*64] = tx_data;
       assign column_tx_last[COLUMN_INDEX*TILES +: TILES] = tx_last;
       assign column_fault[COLUMN_INDEX*TILES +: TILES] = fault;
-      assign host_read_data[COLUMN_INDEX*64 +: 64] = host_read;
     end
     for (genvar unused_column_gen = ACTIVE_COLUMNS;
          unused_column_gen < COLUMNS;
@@ -111,7 +96,6 @@ module lpu_mem_hemisphere #(
       assign column_tx_data[COLUMN_INDEX*TILES*64 +: TILES*64] = '0;
       assign column_tx_last[COLUMN_INDEX*TILES +: TILES] = '0;
       assign column_fault[COLUMN_INDEX*TILES +: TILES] = '0;
-      assign host_read_data[COLUMN_INDEX*64 +: 64] = '0;
     end
   endgenerate
 
@@ -124,11 +108,7 @@ module lpu_mem_hemisphere #(
     east_edge_data_o = '0;
     west_edge_valid_o = '0;
     west_edge_data_o = '0;
-    host_read_data_o = '0;
     conflict_d = 1'b0;
-
-    if (host_column_i < ACTIVE_COLUMNS)
-      host_read_data_o = host_read_data[host_column_i*64 +: 64];
 
     for (integer boundary = 0; boundary < BOUNDARIES; boundary++) begin
       for (integer tile = 0; tile < TILES; tile++) begin

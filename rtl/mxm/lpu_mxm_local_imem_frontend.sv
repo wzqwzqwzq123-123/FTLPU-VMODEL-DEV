@@ -17,7 +17,7 @@ module lpu_mxm_local_imem_frontend #(
 	output logic         load_ready_o,
 	input  logic [16:0]  load_address_i,
 	input  logic [127:0] load_data_i,
-	input  logic [15:0]  load_strb_i,
+	input  logic [3:0]   load_strb_i,
 	input  logic         load_last_i,
 	input  logic         prime_valid_i,
 	output logic         prime_ready_o,
@@ -102,7 +102,7 @@ module lpu_mxm_local_imem_frontend #(
 	assign configured_o = configured_q;
 	assign load_ready_o = !prime_started_q && imem_load_ready && !fault_q;
 	assign load_fire = load_valid_i && load_ready_o;
-	assign load_invalid_w = load_fire && ((load_strb_i != 16'hffff) ||
+	assign load_invalid_w = load_fire && ((load_strb_i != 4'b1111) ||
 		(load_address_i >= IMEM_DEPTH) || load_last_seen_q ||
 		(configured_q && (load_address_i != next_load_address_q)));
 	assign prime_ready_o = !prime_started_q && imem_idle && !fault_q;

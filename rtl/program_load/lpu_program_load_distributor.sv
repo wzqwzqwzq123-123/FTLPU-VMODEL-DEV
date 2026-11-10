@@ -6,39 +6,36 @@ module lpu_program_load_distributor #(
 
 	input logic input_valid_i,
 	output logic input_ready_o,
-	input logic [2:0] input_command_i,
+	input logic [2:0] input_control_i,
 	input logic [127:0] input_data_i,
-	input logic [15:0] input_strb_i,
+	input logic [3:0] input_strb_i,
 	input logic [1:0] input_hemisphere_i,
 	input logic [3:0] input_target_kind_i,
 	input logic [7:0] input_queue_id_i,
 	input logic [16:0] input_imem_address_i,
 	input logic input_last_i,
-	input logic [15:0] input_sequence_id_i,
 
 	output logic west_valid_o,
 	input logic west_ready_i,
-	output logic [2:0] west_command_o,
+	output logic [2:0] west_control_o,
 	output logic [127:0] west_data_o,
-	output logic [15:0] west_strb_o,
+	output logic [3:0] west_strb_o,
 	output logic [1:0] west_hemisphere_o,
 	output logic [3:0] west_target_kind_o,
 	output logic [7:0] west_queue_id_o,
 	output logic [16:0] west_imem_address_o,
 	output logic west_last_o,
-	output logic [15:0] west_sequence_id_o,
 
 	output logic east_valid_o,
 	input logic east_ready_i,
-	output logic [2:0] east_command_o,
+	output logic [2:0] east_control_o,
 	output logic [127:0] east_data_o,
-	output logic [15:0] east_strb_o,
+	output logic [3:0] east_strb_o,
 	output logic [1:0] east_hemisphere_o,
 	output logic [3:0] east_target_kind_o,
 	output logic [7:0] east_queue_id_o,
 	output logic [16:0] east_imem_address_o,
 	output logic east_last_o,
-	output logic [15:0] east_sequence_id_o,
 
 	output logic idle_o,
 	output logic fault_o,
@@ -48,15 +45,14 @@ module lpu_program_load_distributor #(
 
 	logic head_valid;
 	logic head_ready;
-	logic [2:0] head_command;
+	logic [2:0] head_control;
 	logic [127:0] head_data;
-	logic [15:0] head_strb;
+	logic [3:0] head_strb;
 	logic [1:0] head_hemisphere;
 	logic [3:0] head_target_kind;
 	logic [7:0] head_queue_id;
 	logic [16:0] head_imem_address;
 	logic head_last;
-	logic [15:0] head_sequence_id;
 	logic elastic_idle;
 
 	logic west_required_w;
@@ -77,7 +73,7 @@ module lpu_program_load_distributor #(
 		.rst_ni,
 		.input_valid_i,
 		.input_ready_o,
-		.input_command_i,
+		.input_control_i,
 		.input_data_i,
 		.input_strb_i,
 		.input_hemisphere_i,
@@ -85,10 +81,9 @@ module lpu_program_load_distributor #(
 		.input_queue_id_i,
 		.input_imem_address_i,
 		.input_last_i,
-		.input_sequence_id_i,
 		.output_valid_o(head_valid),
 		.output_ready_i(head_ready),
-		.output_command_o(head_command),
+		.output_control_o(head_control),
 		.output_data_o(head_data),
 		.output_strb_o(head_strb),
 		.output_hemisphere_o(head_hemisphere),
@@ -96,7 +91,6 @@ module lpu_program_load_distributor #(
 		.output_queue_id_o(head_queue_id),
 		.output_imem_address_o(head_imem_address),
 		.output_last_o(head_last),
-		.output_sequence_id_o(head_sequence_id),
 		.level_o(),
 		.idle_o(elastic_idle)
 	);
@@ -115,7 +109,7 @@ module lpu_program_load_distributor #(
 	assign east_complete_w = !east_required_w || east_done_q || east_fire;
 	assign head_ready = head_valid && west_complete_w && east_complete_w && !route_invalid_w && !fault_q;
 
-	assign west_command_o = head_command;
+	assign west_control_o = head_control;
 	assign west_data_o = head_data;
 	assign west_strb_o = head_strb;
 	assign west_hemisphere_o = head_hemisphere;
@@ -123,9 +117,8 @@ module lpu_program_load_distributor #(
 	assign west_queue_id_o = head_queue_id;
 	assign west_imem_address_o = head_imem_address;
 	assign west_last_o = head_last;
-	assign west_sequence_id_o = head_sequence_id;
 
-	assign east_command_o = head_command;
+	assign east_control_o = head_control;
 	assign east_data_o = head_data;
 	assign east_strb_o = head_strb;
 	assign east_hemisphere_o = head_hemisphere;
@@ -133,7 +126,6 @@ module lpu_program_load_distributor #(
 	assign east_queue_id_o = head_queue_id;
 	assign east_imem_address_o = head_imem_address;
 	assign east_last_o = head_last;
-	assign east_sequence_id_o = head_sequence_id;
 
 	assign idle_o = elastic_idle && !west_done_q && !east_done_q;
 	assign fault_o = fault_q || route_invalid_w;

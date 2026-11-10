@@ -16,12 +16,7 @@ module lpu_mem_tile_slice_behavior #(
   output logic [5:0]   tx_stream_o,
   output logic [LANES*8-1:0] tx_data_o,
   output logic         tx_last_o,
-  output logic         fault_o,
-
-  input  logic         host_write_valid_i,
-  input  logic [15:0]  host_address_i,
-  input  logic [LANES*8-1:0] host_write_data_i,
-  output logic [LANES*8-1:0] host_read_data_o
+  output logic         fault_o
 );
   localparam integer TILE_WORD_WIDTH = LANES * 8;
 
@@ -44,10 +39,6 @@ module lpu_mem_tile_slice_behavior #(
   );
 
   always_comb begin
-    host_read_data_o = '0;
-    if (host_address_i < DEPTH_ROWS)
-      host_read_data_o = sram[host_address_i];
-
     rx_consume_o = '0;
     tx_valid_o  = 1'b0;
     tx_stream_o = stream;
@@ -81,13 +72,6 @@ module lpu_mem_tile_slice_behavior #(
     if (!rst_ni) begin
       fault_o     <= 1'b0;
     end else begin
-      if (host_write_valid_i) begin
-        if (host_address_i < DEPTH_ROWS)
-          sram[host_address_i] <= host_write_data_i;
-        else
-          fault_o <= 1'b1;
-      end
-
       if (instruction_valid_i) begin
         if (!instruction_legal || (address >= DEPTH_ROWS)) begin
           fault_o <= 1'b1;

@@ -13,11 +13,7 @@ module lpu_mem_tile_slice_sram #(
   output logic [5:0] tx_stream_o,
   output logic [LANES*8-1:0] tx_data_o,
   output logic tx_last_o,
-  output logic fault_o,
-  input  logic host_write_valid_i,
-  input  logic [15:0] host_address_i,
-  input  logic [LANES*8-1:0] host_write_data_i,
-  output logic [LANES*8-1:0] host_read_data_o
+  output logic fault_o
 );
   localparam integer WORD_WIDTH = LANES * 8;
 
@@ -68,18 +64,17 @@ module lpu_mem_tile_slice_sram #(
   );
 
   always_comb begin
-    memory_req_valid = 1'b1;
+	// The single SRAM port is owned exclusively by MEM instructions.
+    memory_req_valid = 1'b0;
     memory_write = 1'b0;
-    memory_address = host_address_i;
-    memory_write_data = host_write_data_i;
+    memory_address = '0;
+    memory_write_data = '0;
     rx_consume_o = '0;
 
     if (read_write_pending_q) begin
       memory_write = 1'b1;
       memory_address = read_write_address_q;
       memory_write_data = read_write_data_q;
-    end else if (host_write_valid_i) begin
-      memory_write = 1'b1;
     end else if (instruction_valid_i && instruction_legal) begin
       case (opcode)
         3'd0: memory_address = address;
@@ -107,8 +102,6 @@ module lpu_mem_tile_slice_sram #(
     tx_stream_o = response_stream_q;
     tx_data_o = memory_read_data;
     tx_last_o = tx_valid_o;
-    host_read_data_o = response_is_instruction_q
-      ? '0 : memory_read_data;
   end
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
@@ -122,15 +115,14 @@ module lpu_mem_tile_slice_sram #(
     end else begin
       if (memory_req_valid && !memory_write) begin
         response_is_instruction_q <= instruction_valid_i &&
-          instruction_legal && !host_write_valid_i &&
-          !read_write_pending_q &&
+          instruction_legal && !read_write_pending_q &&
           ((opcode == 3'd0) || (opcode == 3'd2));
         response_stream_q <= stream;
       end
 
       if (read_write_pending_q) begin
         read_write_pending_q <= 1'b0;
-        if (instruction_valid_i || host_write_valid_i)
+        if (instruction_valid_i)
           fault_o <= 1'b1;
       end else if (instruction_valid_i && instruction_legal &&
                    (opcode == 3'd2) &&
@@ -140,9 +132,6 @@ module lpu_mem_tile_slice_sram #(
         read_write_data_q <=
           rx_data_i[map_or_write_stream*WORD_WIDTH +: WORD_WIDTH];
       end
-
-      if (host_write_valid_i && (host_address_i >= DEPTH_ROWS))
-        fault_o <= 1'b1;
       if (instruction_valid_i) begin
         if (!instruction_legal || address >= DEPTH_ROWS ||
             ((opcode == 3'd2) && write_address >= DEPTH_ROWS) ||

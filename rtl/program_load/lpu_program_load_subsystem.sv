@@ -29,7 +29,6 @@ module lpu_program_load_subsystem #(
 	input logic command_write_image_first_i,
 	input logic command_write_image_last_i,
 	input logic [15:0] command_write_expected_word_count_i,
-	input logic [15:0] command_write_sequence_id_i,
 	input logic [COMMAND_ADDRESS_WIDTH-1:0] command_write_jump_address_i,
 
 	input logic start_valid_i,
@@ -52,33 +51,29 @@ module lpu_program_load_subsystem #(
 
 	output logic west_load_valid_o,
 	input logic west_load_ready_i,
-	output logic [2:0] west_load_command_o,
+	output logic [2:0] west_load_control_o,
 	output logic [127:0] west_load_data_o,
-	output logic [15:0] west_load_strb_o,
+	output logic [3:0] west_load_strb_o,
 	output logic [3:0] west_load_target_kind_o,
 	output logic [7:0] west_load_queue_id_o,
 	output logic [16:0] west_load_imem_address_o,
 	output logic west_load_last_o,
-	output logic [15:0] west_load_sequence_id_o,
 
 	output logic east_load_valid_o,
 	input logic east_load_ready_i,
-	output logic [2:0] east_load_command_o,
+	output logic [2:0] east_load_control_o,
 	output logic [127:0] east_load_data_o,
-	output logic [15:0] east_load_strb_o,
+	output logic [3:0] east_load_strb_o,
 	output logic [3:0] east_load_target_kind_o,
 	output logic [7:0] east_load_queue_id_o,
 	output logic [16:0] east_load_imem_address_o,
 	output logic east_load_last_o,
-	output logic [15:0] east_load_sequence_id_o,
 
 	input logic west_commit_valid_i,
 	output logic west_commit_ready_o,
-	input logic [15:0] west_commit_sequence_id_i,
 	input logic west_commit_error_i,
 	input logic east_commit_valid_i,
 	output logic east_commit_ready_o,
-	input logic [15:0] east_commit_sequence_id_i,
 	input logic east_commit_error_i,
 
 	input logic weight_load_done_i,
@@ -109,14 +104,12 @@ module lpu_program_load_subsystem #(
 	logic loader_image_first;
 	logic loader_image_last;
 	logic [15:0] loader_expected_word_count;
-	logic [15:0] loader_sequence_id;
 	logic [7:0] loader_dma_id;
 	logic loader_commit_valid;
 	logic loader_commit_ready;
 	logic [1:0] loader_commit_hemisphere;
 	logic [3:0] loader_commit_target_kind;
 	logic [7:0] loader_commit_queue_id;
-	logic [15:0] loader_commit_sequence_id;
 	logic loader_busy;
 	logic loader_done;
 	logic loader_fault;
@@ -137,7 +130,6 @@ module lpu_program_load_subsystem #(
 	logic config_image_first;
 	logic config_image_last;
 	logic [15:0] config_expected_word_count;
-	logic [15:0] config_sequence_id;
 	logic [7:0] config_dma_id;
 	logic [$clog2(CONFIG_FIFO_DEPTH+1)-1:0] config_level;
 	logic config_empty;
@@ -160,13 +152,12 @@ module lpu_program_load_subsystem #(
 	logic reassembler_word_valid;
 	logic reassembler_word_ready;
 	logic [127:0] reassembler_word_data;
-	logic [15:0] reassembler_word_strb;
+	logic [3:0] reassembler_word_strb;
 	logic [1:0] reassembler_word_hemisphere;
 	logic [3:0] reassembler_word_target_kind;
 	logic [7:0] reassembler_word_queue_id;
 	logic [16:0] reassembler_word_imem_address;
 	logic reassembler_word_last;
-	logic [15:0] reassembler_word_sequence_id;
 	logic reassembler_idle;
 	logic reassembler_fault;
 	logic [5:0] reassembler_fault_code;
@@ -174,80 +165,72 @@ module lpu_program_load_subsystem #(
 	// Word FIFO to distributor mux.
 	logic word_dequeue_valid;
 	logic word_dequeue_ready;
-	logic [2:0] word_dequeue_command;
 	logic [127:0] word_dequeue_data;
-	logic [15:0] word_dequeue_strb;
+	logic [3:0] word_dequeue_strb;
 	logic [1:0] word_dequeue_hemisphere;
 	logic [3:0] word_dequeue_target_kind;
 	logic [7:0] word_dequeue_queue_id;
 	logic [16:0] word_dequeue_imem_address;
 	logic word_dequeue_last;
-	logic [15:0] word_dequeue_sequence_id;
 	logic word_fifo_empty;
 	logic distributor_input_valid;
 	logic distributor_input_ready;
-	logic [2:0] distributor_input_command;
+	logic [2:0] distributor_input_control;
 	logic [127:0] distributor_input_data;
-	logic [15:0] distributor_input_strb;
+	logic [3:0] distributor_input_strb;
 	logic [1:0] distributor_input_hemisphere;
 	logic [3:0] distributor_input_target_kind;
 	logic [7:0] distributor_input_queue_id;
 	logic [16:0] distributor_input_imem_address;
 	logic distributor_input_last;
-	logic [15:0] distributor_input_sequence_id;
 	logic commit_select_w;
 	logic prime_select_w;
 
 	// Queue descriptors are retained until every Program Image has committed.
 	logic prime_enqueue_valid;
 	logic prime_enqueue_ready;
-	logic [29:0] prime_enqueue_data;
+	logic [13:0] prime_enqueue_data;
 	logic prime_dequeue_valid;
 	logic prime_dequeue_ready;
-	logic [29:0] prime_dequeue_data;
+	logic [13:0] prime_dequeue_data;
 	logic [1:0] prime_dequeue_hemisphere;
 	logic [3:0] prime_dequeue_target_kind;
 	logic [7:0] prime_dequeue_queue_id;
-	logic [15:0] prime_dequeue_sequence_id;
 	logic [$clog2(PRIME_FIFO_DEPTH+1)-1:0] prime_fifo_level;
 
 	// Distributor internal branches are gated by commit-scoreboard capacity before reaching targets.
 	logic distributor_west_valid;
 	logic distributor_west_ready;
-	logic [2:0] distributor_west_command;
+	logic [2:0] distributor_west_control;
 	logic [127:0] distributor_west_data;
-	logic [15:0] distributor_west_strb;
+	logic [3:0] distributor_west_strb;
 	logic [1:0] distributor_west_hemisphere;
 	logic [3:0] distributor_west_target_kind;
 	logic [7:0] distributor_west_queue_id;
 	logic [16:0] distributor_west_imem_address;
 	logic distributor_west_last;
-	logic [15:0] distributor_west_sequence_id;
 	logic distributor_east_valid;
 	logic distributor_east_ready;
-	logic [2:0] distributor_east_command;
+	logic [2:0] distributor_east_control;
 	logic [127:0] distributor_east_data;
-	logic [15:0] distributor_east_strb;
+	logic [3:0] distributor_east_strb;
 	logic [1:0] distributor_east_hemisphere;
 	logic [3:0] distributor_east_target_kind;
 	logic [7:0] distributor_east_queue_id;
 	logic [16:0] distributor_east_imem_address;
 	logic distributor_east_last;
-	logic [15:0] distributor_east_sequence_id;
 	logic distributor_idle;
 	logic distributor_fault;
 	logic [5:0] distributor_fault_code;
 
-	// Per-hemisphere ordered commit scoreboards catch missing, duplicate, and reordered acknowledgements.
+	// Per-hemisphere token FIFOs retain the number of accepted WRITE operations awaiting a response.
 	logic west_commit_enqueue_ready;
 	logic west_commit_expected_valid;
 	logic west_commit_expected_pop;
-	logic [15:0] west_commit_expected_sequence;
 	logic [$clog2(COMMIT_FIFO_DEPTH+1)-1:0] west_commit_level;
 	logic east_commit_enqueue_ready;
 	logic east_commit_expected_valid;
 	logic east_commit_expected_pop;
-	logic [15:0] east_commit_expected_sequence;
 	logic [$clog2(COMMIT_FIFO_DEPTH+1)-1:0] east_commit_level;
 	logic west_bus_fire;
 	logic east_bus_fire;
@@ -286,7 +269,6 @@ module lpu_program_load_subsystem #(
 		.command_write_image_first_i,
 		.command_write_image_last_i,
 		.command_write_expected_word_count_i,
-		.command_write_sequence_id_i,
 		.command_write_jump_address_i,
 		.start_valid_i,
 		.start_ready_o,
@@ -303,14 +285,12 @@ module lpu_program_load_subsystem #(
 		.transaction_image_first_o(loader_image_first),
 		.transaction_image_last_o(loader_image_last),
 		.transaction_expected_word_count_o(loader_expected_word_count),
-		.transaction_sequence_id_o(loader_sequence_id),
 		.transaction_dma_id_o(loader_dma_id),
 		.commit_valid_o(loader_commit_valid),
 		.commit_ready_i(loader_commit_ready),
 		.commit_hemisphere_o(loader_commit_hemisphere),
 		.commit_target_kind_o(loader_commit_target_kind),
 		.commit_queue_id_o(loader_commit_queue_id),
-		.commit_sequence_id_o(loader_commit_sequence_id),
 		.load_pipeline_idle_i(load_pipeline_idle_w),
 		.command_pc_o(),
 		.busy_o(loader_busy),
@@ -341,7 +321,6 @@ module lpu_program_load_subsystem #(
 		.enqueue_image_first_i(loader_image_first),
 		.enqueue_image_last_i(loader_image_last),
 		.enqueue_expected_word_count_i(loader_expected_word_count),
-		.enqueue_sequence_id_i(loader_sequence_id),
 		.enqueue_dma_id_i(loader_dma_id),
 		.dequeue_valid_o(config_dequeue_valid),
 		.dequeue_ready_i(config_dequeue_ready),
@@ -355,7 +334,6 @@ module lpu_program_load_subsystem #(
 		.dequeue_image_first_o(config_image_first),
 		.dequeue_image_last_o(config_image_last),
 		.dequeue_expected_word_count_o(config_expected_word_count),
-		.dequeue_sequence_id_o(config_sequence_id),
 		.dequeue_dma_id_o(config_dma_id),
 		.level_o(config_level),
 		.empty_o(config_empty),
@@ -418,7 +396,6 @@ module lpu_program_load_subsystem #(
 		.config_image_first_i(config_image_first),
 		.config_image_last_i(config_image_last),
 		.config_expected_word_count_i(config_expected_word_count),
-		.config_sequence_id_i(config_sequence_id),
 		.config_dma_id_i(config_dma_id),
 		.response_valid_i(dma_response_valid),
 		.response_ready_o(dma_response_ready),
@@ -436,7 +413,6 @@ module lpu_program_load_subsystem #(
 		.word_queue_id_o(reassembler_word_queue_id),
 		.word_imem_address_o(reassembler_word_imem_address),
 		.word_image_last_o(reassembler_word_last),
-		.word_sequence_id_o(reassembler_word_sequence_id),
 		.received_byte_count_o(),
 		.generated_word_count_o(),
 		.idle_o(reassembler_idle),
@@ -451,7 +427,6 @@ module lpu_program_load_subsystem #(
 		.rst_ni(internal_rst_ni),
 		.enqueue_valid_i(reassembler_word_valid),
 		.enqueue_ready_o(reassembler_word_ready),
-		.enqueue_command_i(PROGRAM_LOAD_WRITE),
 		.enqueue_data_i(reassembler_word_data),
 		.enqueue_strb_i(reassembler_word_strb),
 		.enqueue_hemisphere_i(reassembler_word_hemisphere),
@@ -459,10 +434,8 @@ module lpu_program_load_subsystem #(
 		.enqueue_queue_id_i(reassembler_word_queue_id),
 		.enqueue_imem_address_i(reassembler_word_imem_address),
 		.enqueue_last_i(reassembler_word_last),
-		.enqueue_sequence_id_i(reassembler_word_sequence_id),
 		.dequeue_valid_o(word_dequeue_valid),
 		.dequeue_ready_i(word_dequeue_ready),
-		.dequeue_command_o(word_dequeue_command),
 		.dequeue_data_o(word_dequeue_data),
 		.dequeue_strb_o(word_dequeue_strb),
 		.dequeue_hemisphere_o(word_dequeue_hemisphere),
@@ -470,7 +443,6 @@ module lpu_program_load_subsystem #(
 		.dequeue_queue_id_o(word_dequeue_queue_id),
 		.dequeue_imem_address_o(word_dequeue_imem_address),
 		.dequeue_last_o(word_dequeue_last),
-		.dequeue_sequence_id_o(word_dequeue_sequence_id),
 		.level_o(),
 		.empty_o(word_fifo_empty),
 		.full_o()
@@ -482,10 +454,10 @@ module lpu_program_load_subsystem #(
 	assign loader_commit_ready = commit_select_w && prime_enqueue_ready;
 	assign prime_enqueue_valid = commit_select_w;
 	assign prime_enqueue_data = {loader_commit_hemisphere, loader_commit_target_kind,
-		loader_commit_queue_id, loader_commit_sequence_id};
+		loader_commit_queue_id};
 
 	lpu_queue_fifo #(
-		.DATA_WIDTH(30),
+		.DATA_WIDTH(14),
 		.DEPTH(PRIME_FIFO_DEPTH)
 	) u_prime_fifo (
 		.clk_i,
@@ -500,18 +472,17 @@ module lpu_program_load_subsystem #(
 	);
 
 	assign {prime_dequeue_hemisphere, prime_dequeue_target_kind,
-		prime_dequeue_queue_id, prime_dequeue_sequence_id} = prime_dequeue_data;
+		prime_dequeue_queue_id} = prime_dequeue_data;
 	assign prime_select_w = instruction_load_done_q && prime_dequeue_valid;
 	assign distributor_input_valid = prime_select_w ? prime_dequeue_valid : word_dequeue_valid;
-	assign distributor_input_command = prime_select_w ? PROGRAM_LOAD_PRIME : word_dequeue_command;
+	assign distributor_input_control = prime_select_w ? PROGRAM_LOAD_PRIME : PROGRAM_LOAD_WRITE;
 	assign distributor_input_data = prime_select_w ? 128'd0 : word_dequeue_data;
-	assign distributor_input_strb = prime_select_w ? 16'd0 : word_dequeue_strb;
+	assign distributor_input_strb = prime_select_w ? 4'd0 : word_dequeue_strb;
 	assign distributor_input_hemisphere = prime_select_w ? prime_dequeue_hemisphere : word_dequeue_hemisphere;
 	assign distributor_input_target_kind = prime_select_w ? prime_dequeue_target_kind : word_dequeue_target_kind;
 	assign distributor_input_queue_id = prime_select_w ? prime_dequeue_queue_id : word_dequeue_queue_id;
 	assign distributor_input_imem_address = prime_select_w ? 17'd0 : word_dequeue_imem_address;
 	assign distributor_input_last = prime_select_w ? 1'b1 : word_dequeue_last;
-	assign distributor_input_sequence_id = prime_select_w ? prime_dequeue_sequence_id : word_dequeue_sequence_id;
 	assign prime_dequeue_ready = prime_select_w && distributor_input_ready;
 	assign word_dequeue_ready = !prime_select_w && distributor_input_ready;
 
@@ -520,7 +491,7 @@ module lpu_program_load_subsystem #(
 		.rst_ni(internal_rst_ni),
 		.input_valid_i(distributor_input_valid),
 		.input_ready_o(distributor_input_ready),
-		.input_command_i(distributor_input_command),
+		.input_control_i(distributor_input_control),
 		.input_data_i(distributor_input_data),
 		.input_strb_i(distributor_input_strb),
 		.input_hemisphere_i(distributor_input_hemisphere),
@@ -528,10 +499,9 @@ module lpu_program_load_subsystem #(
 		.input_queue_id_i(distributor_input_queue_id),
 		.input_imem_address_i(distributor_input_imem_address),
 		.input_last_i(distributor_input_last),
-		.input_sequence_id_i(distributor_input_sequence_id),
 		.west_valid_o(distributor_west_valid),
 		.west_ready_i(distributor_west_ready),
-		.west_command_o(distributor_west_command),
+		.west_control_o(distributor_west_control),
 		.west_data_o(distributor_west_data),
 		.west_strb_o(distributor_west_strb),
 		.west_hemisphere_o(distributor_west_hemisphere),
@@ -539,10 +509,9 @@ module lpu_program_load_subsystem #(
 		.west_queue_id_o(distributor_west_queue_id),
 		.west_imem_address_o(distributor_west_imem_address),
 		.west_last_o(distributor_west_last),
-		.west_sequence_id_o(distributor_west_sequence_id),
 		.east_valid_o(distributor_east_valid),
 		.east_ready_i(distributor_east_ready),
-		.east_command_o(distributor_east_command),
+		.east_control_o(distributor_east_control),
 		.east_data_o(distributor_east_data),
 		.east_strb_o(distributor_east_strb),
 		.east_hemisphere_o(distributor_east_hemisphere),
@@ -550,67 +519,64 @@ module lpu_program_load_subsystem #(
 		.east_queue_id_o(distributor_east_queue_id),
 		.east_imem_address_o(distributor_east_imem_address),
 		.east_last_o(distributor_east_last),
-		.east_sequence_id_o(distributor_east_sequence_id),
 		.idle_o(distributor_idle),
 		.fault_o(distributor_fault),
 		.fault_code_o(distributor_fault_code)
 	);
 
 	assign west_load_valid_o = distributor_west_valid &&
-		((distributor_west_command != PROGRAM_LOAD_WRITE) || west_commit_enqueue_ready);
+		((distributor_west_control != PROGRAM_LOAD_WRITE) || west_commit_enqueue_ready);
 	assign distributor_west_ready = west_load_ready_i &&
-		((distributor_west_command != PROGRAM_LOAD_WRITE) || west_commit_enqueue_ready);
-	assign west_load_command_o = distributor_west_command;
+		((distributor_west_control != PROGRAM_LOAD_WRITE) || west_commit_enqueue_ready);
+	assign west_load_control_o = distributor_west_control;
 	assign west_load_data_o = distributor_west_data;
 	assign west_load_strb_o = distributor_west_strb;
 	assign west_load_target_kind_o = distributor_west_target_kind;
 	assign west_load_queue_id_o = distributor_west_queue_id;
 	assign west_load_imem_address_o = distributor_west_imem_address;
 	assign west_load_last_o = distributor_west_last;
-	assign west_load_sequence_id_o = distributor_west_sequence_id;
 	assign west_bus_fire = west_load_valid_o && west_load_ready_i;
 
 	assign east_load_valid_o = distributor_east_valid &&
-		((distributor_east_command != PROGRAM_LOAD_WRITE) || east_commit_enqueue_ready);
+		((distributor_east_control != PROGRAM_LOAD_WRITE) || east_commit_enqueue_ready);
 	assign distributor_east_ready = east_load_ready_i &&
-		((distributor_east_command != PROGRAM_LOAD_WRITE) || east_commit_enqueue_ready);
-	assign east_load_command_o = distributor_east_command;
+		((distributor_east_control != PROGRAM_LOAD_WRITE) || east_commit_enqueue_ready);
+	assign east_load_control_o = distributor_east_control;
 	assign east_load_data_o = distributor_east_data;
 	assign east_load_strb_o = distributor_east_strb;
 	assign east_load_target_kind_o = distributor_east_target_kind;
 	assign east_load_queue_id_o = distributor_east_queue_id;
 	assign east_load_imem_address_o = distributor_east_imem_address;
 	assign east_load_last_o = distributor_east_last;
-	assign east_load_sequence_id_o = distributor_east_sequence_id;
 	assign east_bus_fire = east_load_valid_o && east_load_ready_i;
 
 	lpu_queue_fifo #(
-		.DATA_WIDTH(16),
+		.DATA_WIDTH(1),
 		.DEPTH(COMMIT_FIFO_DEPTH)
 	) u_west_commit_fifo (
 		.clk_i,
 		.rst_ni(internal_rst_ni),
-		.enqueue_valid_i(west_bus_fire && (west_load_command_o == PROGRAM_LOAD_WRITE)),
+		.enqueue_valid_i(west_bus_fire && (west_load_control_o == PROGRAM_LOAD_WRITE)),
 		.enqueue_ready_o(west_commit_enqueue_ready),
-		.enqueue_data_i(west_load_sequence_id_o),
+		.enqueue_data_i(1'b1),
 		.dequeue_valid_o(west_commit_expected_valid),
 		.dequeue_ready_i(west_commit_expected_pop),
-		.dequeue_data_o(west_commit_expected_sequence),
+		.dequeue_data_o(),
 		.level_o(west_commit_level)
 	);
 
 	lpu_queue_fifo #(
-		.DATA_WIDTH(16),
+		.DATA_WIDTH(1),
 		.DEPTH(COMMIT_FIFO_DEPTH)
 	) u_east_commit_fifo (
 		.clk_i,
 		.rst_ni(internal_rst_ni),
-		.enqueue_valid_i(east_bus_fire && (east_load_command_o == PROGRAM_LOAD_WRITE)),
+		.enqueue_valid_i(east_bus_fire && (east_load_control_o == PROGRAM_LOAD_WRITE)),
 		.enqueue_ready_o(east_commit_enqueue_ready),
-		.enqueue_data_i(east_load_sequence_id_o),
+		.enqueue_data_i(1'b1),
 		.dequeue_valid_o(east_commit_expected_valid),
 		.dequeue_ready_i(east_commit_expected_pop),
-		.dequeue_data_o(east_commit_expected_sequence),
+		.dequeue_data_o(),
 		.level_o(east_commit_level)
 	);
 
@@ -618,10 +584,8 @@ module lpu_program_load_subsystem #(
 	assign east_commit_ready_o = internal_rst_ni && !system_fault_q;
 	assign west_commit_fire = west_commit_valid_i && west_commit_ready_o;
 	assign east_commit_fire = east_commit_valid_i && east_commit_ready_o;
-	assign west_commit_good_w = west_commit_fire && west_commit_expected_valid &&
-		(west_commit_sequence_id_i == west_commit_expected_sequence) && !west_commit_error_i;
-	assign east_commit_good_w = east_commit_fire && east_commit_expected_valid &&
-		(east_commit_sequence_id_i == east_commit_expected_sequence) && !east_commit_error_i;
+	assign west_commit_good_w = west_commit_fire && west_commit_expected_valid && !west_commit_error_i;
+	assign east_commit_good_w = east_commit_fire && east_commit_expected_valid && !east_commit_error_i;
 	assign west_commit_expected_pop = west_commit_good_w;
 	assign east_commit_expected_pop = east_commit_good_w;
 	assign commit_fault_w = (west_commit_fire && !west_commit_good_w) ||

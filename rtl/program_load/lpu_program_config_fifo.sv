@@ -16,7 +16,6 @@ module lpu_program_config_fifo #(
 	input logic enqueue_image_first_i,
 	input logic enqueue_image_last_i,
 	input logic [15:0] enqueue_expected_word_count_i,
-	input logic [15:0] enqueue_sequence_id_i,
 	input logic [7:0] enqueue_dma_id_i,
 
 	output logic dequeue_valid_o,
@@ -31,14 +30,13 @@ module lpu_program_config_fifo #(
 	output logic dequeue_image_first_o,
 	output logic dequeue_image_last_o,
 	output logic [15:0] dequeue_expected_word_count_o,
-	output logic [15:0] dequeue_sequence_id_o,
 	output logic [7:0] dequeue_dma_id_o,
 
 	output logic [$clog2(DEPTH+1)-1:0] level_o,
 	output logic empty_o,
 	output logic full_o
 );
-	localparam integer CONFIG_WIDTH = 171;
+	localparam integer CONFIG_WIDTH = 155;
 
 	logic [CONFIG_WIDTH-1:0] enqueue_data;
 	logic [CONFIG_WIDTH-1:0] dequeue_data;
@@ -55,7 +53,6 @@ module lpu_program_config_fifo #(
 		enqueue_image_first_i,
 		enqueue_image_last_i,
 		enqueue_expected_word_count_i,
-		enqueue_sequence_id_i,
 		enqueue_dma_id_i
 	};
 
@@ -70,7 +67,6 @@ module lpu_program_config_fifo #(
 		dequeue_image_first_o,
 		dequeue_image_last_o,
 		dequeue_expected_word_count_o,
-		dequeue_sequence_id_o,
 		dequeue_dma_id_o
 	} = dequeue_data;
 

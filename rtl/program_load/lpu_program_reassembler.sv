@@ -17,7 +17,6 @@ module lpu_program_reassembler #(
 	input logic config_image_first_i,
 	input logic config_image_last_i,
 	input logic [15:0] config_expected_word_count_i,
-	input logic [15:0] config_sequence_id_i,
 	input logic [7:0] config_dma_id_i,
 
 	input logic response_valid_i,
@@ -31,13 +30,12 @@ module lpu_program_reassembler #(
 	output logic word_valid_o,
 	input logic word_ready_i,
 	output logic [127:0] word_data_o,
-	output logic [15:0] word_strb_o,
+	output logic [3:0] word_strb_o,
 	output logic [1:0] word_hemisphere_o,
 	output logic [3:0] word_target_kind_o,
 	output logic [7:0] word_queue_id_o,
 	output logic [16:0] word_imem_address_o,
 	output logic word_image_last_o,
-	output logic [15:0] word_sequence_id_o,
 
 	output logic [31:0] received_byte_count_o,
 	output logic [15:0] generated_word_count_o,
@@ -67,7 +65,6 @@ module lpu_program_reassembler #(
 	logic [1:0] image_format_q;
 	logic [16:0] image_imem_base_address_q;
 	logic [15:0] image_expected_word_count_q;
-	logic [15:0] image_sequence_id_q;
 	logic image_last_seen_q;
 	logic [31:0] transaction_received_q;
 	logic [31:0] image_received_q;
@@ -145,13 +142,12 @@ module lpu_program_reassembler #(
 	assign word_fire = word_valid_o && word_ready_i;
 
 	assign word_data_o = buffer_q[127:0];
-	assign word_strb_o = image_format_q == PROGRAM_FORMAT_96 ? 16'h0FFF : 16'hFFFF;
+	assign word_strb_o = image_format_q == PROGRAM_FORMAT_96 ? 4'b0111 : 4'b1111;
 	assign word_hemisphere_o = image_hemisphere_q;
 	assign word_target_kind_o = image_target_kind_q;
 	assign word_queue_id_o = image_queue_id_q;
 	assign word_imem_address_o = image_imem_base_address_q + generated_word_count_q;
 	assign word_image_last_o = final_word_w;
-	assign word_sequence_id_o = image_sequence_id_q + generated_word_count_q;
 
 	assign keep_byte_count_w = count_keep_bytes(response_keep_i);
 	assign keep_invalid_w = response_fire &&
@@ -192,8 +188,7 @@ module lpu_program_reassembler #(
 			(config_queue_id_i != image_queue_id_q) ||
 			(config_format_i != image_format_q) ||
 			(config_imem_base_address_i != image_imem_base_address_q) ||
-			(config_expected_word_count_i != image_expected_word_count_q) ||
-			(config_sequence_id_i != image_sequence_id_q))));
+			(config_expected_word_count_i != image_expected_word_count_q))));
 
 	assign response_ready_o = config_seen_q && !fault_q &&
 		(count_after_pop_w + keep_byte_count_w <= BUFFER_BYTES);
@@ -271,7 +266,6 @@ module lpu_program_reassembler #(
 			image_format_q <= '0;
 			image_imem_base_address_q <= '0;
 			image_expected_word_count_q <= '0;
-			image_sequence_id_q <= '0;
 			image_last_seen_q <= 1'b0;
 			image_received_q <= '0;
 			generated_word_count_q <= '0;
@@ -285,7 +279,6 @@ module lpu_program_reassembler #(
 				image_format_q <= config_format_i;
 				image_imem_base_address_q <= config_imem_base_address_i;
 				image_expected_word_count_q <= config_expected_word_count_i;
-				image_sequence_id_q <= config_sequence_id_i;
 				image_last_seen_q <= 1'b0;
 				image_received_q <= '0;
 				generated_word_count_q <= '0;

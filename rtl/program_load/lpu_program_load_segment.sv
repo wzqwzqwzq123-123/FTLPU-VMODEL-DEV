@@ -9,39 +9,36 @@ module lpu_program_load_segment #(
 
 	input logic input_valid_i,
 	output logic input_ready_o,
-	input logic [2:0] input_command_i,
+	input logic [2:0] input_control_i,
 	input logic [127:0] input_data_i,
-	input logic [15:0] input_strb_i,
+	input logic [3:0] input_strb_i,
 	input logic [1:0] input_hemisphere_i,
 	input logic [3:0] input_target_kind_i,
 	input logic [7:0] input_queue_id_i,
 	input logic [16:0] input_imem_address_i,
 	input logic input_last_i,
-	input logic [15:0] input_sequence_id_i,
 
 	output logic local_valid_o,
 	input logic local_ready_i,
-	output logic [2:0] local_command_o,
+	output logic [2:0] local_control_o,
 	output logic [127:0] local_data_o,
-	output logic [15:0] local_strb_o,
+	output logic [3:0] local_strb_o,
 	output logic [1:0] local_hemisphere_o,
 	output logic [3:0] local_target_kind_o,
 	output logic [7:0] local_queue_id_o,
 	output logic [16:0] local_imem_address_o,
 	output logic local_last_o,
-	output logic [15:0] local_sequence_id_o,
 
 	output logic forward_valid_o,
 	input logic forward_ready_i,
-	output logic [2:0] forward_command_o,
+	output logic [2:0] forward_control_o,
 	output logic [127:0] forward_data_o,
-	output logic [15:0] forward_strb_o,
+	output logic [3:0] forward_strb_o,
 	output logic [1:0] forward_hemisphere_o,
 	output logic [3:0] forward_target_kind_o,
 	output logic [7:0] forward_queue_id_o,
 	output logic [16:0] forward_imem_address_o,
 	output logic forward_last_o,
-	output logic [15:0] forward_sequence_id_o,
 
 	output logic idle_o
 );
@@ -49,15 +46,14 @@ module lpu_program_load_segment #(
 
 	logic head_valid;
 	logic head_ready;
-	logic [2:0] head_command;
+	logic [2:0] head_control;
 	logic [127:0] head_data;
-	logic [15:0] head_strb;
+	logic [3:0] head_strb;
 	logic [1:0] head_hemisphere;
 	logic [3:0] head_target_kind;
 	logic [7:0] head_queue_id;
 	logic [16:0] head_imem_address;
 	logic head_last;
-	logic [15:0] head_sequence_id;
 	logic elastic_idle;
 
 	logic broadcast_w;
@@ -85,7 +81,7 @@ module lpu_program_load_segment #(
 		.rst_ni,
 		.input_valid_i,
 		.input_ready_o,
-		.input_command_i,
+		.input_control_i,
 		.input_data_i,
 		.input_strb_i,
 		.input_hemisphere_i,
@@ -93,10 +89,9 @@ module lpu_program_load_segment #(
 		.input_queue_id_i,
 		.input_imem_address_i,
 		.input_last_i,
-		.input_sequence_id_i,
 		.output_valid_o(head_valid),
 		.output_ready_i(head_ready),
-		.output_command_o(head_command),
+		.output_control_o(head_control),
 		.output_data_o(head_data),
 		.output_strb_o(head_strb),
 		.output_hemisphere_o(head_hemisphere),
@@ -104,12 +99,11 @@ module lpu_program_load_segment #(
 		.output_queue_id_o(head_queue_id),
 		.output_imem_address_o(head_imem_address),
 		.output_last_o(head_last),
-		.output_sequence_id_o(head_sequence_id),
 		.level_o(),
 		.idle_o(elastic_idle)
 	);
 
-	assign broadcast_w = head_command != PROGRAM_LOAD_WRITE;
+	assign broadcast_w = head_control != PROGRAM_LOAD_WRITE;
 	assign target_kind_match_w = head_target_kind == SEGMENT_TARGET_KIND;
 	assign queue_in_segment_w = (head_queue_id >= QUEUE_BASE) &&
 		(head_queue_id < QUEUE_BASE + QUEUE_COUNT);
@@ -125,7 +119,7 @@ module lpu_program_load_segment #(
 	assign forward_complete_w = !forward_required_w || forward_done_q || forward_fire;
 	assign head_ready = head_valid && local_complete_w && forward_complete_w;
 
-	assign local_command_o = head_command;
+	assign local_control_o = head_control;
 	assign local_data_o = head_data;
 	assign local_strb_o = head_strb;
 	assign local_hemisphere_o = head_hemisphere;
@@ -133,9 +127,8 @@ module lpu_program_load_segment #(
 	assign local_queue_id_o = head_queue_id;
 	assign local_imem_address_o = head_imem_address;
 	assign local_last_o = head_last;
-	assign local_sequence_id_o = head_sequence_id;
 
-	assign forward_command_o = head_command;
+	assign forward_control_o = head_control;
 	assign forward_data_o = head_data;
 	assign forward_strb_o = head_strb;
 	assign forward_hemisphere_o = head_hemisphere;
@@ -143,7 +136,6 @@ module lpu_program_load_segment #(
 	assign forward_queue_id_o = head_queue_id;
 	assign forward_imem_address_o = head_imem_address;
 	assign forward_last_o = head_last;
-	assign forward_sequence_id_o = head_sequence_id;
 	assign idle_o = elastic_idle && !local_done_q && !forward_done_q;
 
 	// A broadcast may complete its local and forward branches on different cycles.

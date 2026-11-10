@@ -14,11 +14,7 @@ module lpu_mem_tile_slice #(
   output logic [5:0] tx_stream_o,
   output logic [LANES*8-1:0] tx_data_o,
   output logic tx_last_o,
-  output logic fault_o,
-  input  logic host_write_valid_i,
-  input  logic [15:0] host_address_i,
-  input  logic [LANES*8-1:0] host_write_data_i,
-  output logic [LANES*8-1:0] host_read_data_o
+  output logic fault_o
 );
   generate
     if (USE_SRAM_MACRO) begin : gen_sram

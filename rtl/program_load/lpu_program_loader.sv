@@ -19,7 +19,6 @@ module lpu_program_loader #(
 	input logic command_write_image_first_i,
 	input logic command_write_image_last_i,
 	input logic [15:0] command_write_expected_word_count_i,
-	input logic [15:0] command_write_sequence_id_i,
 	input logic [COMMAND_ADDRESS_WIDTH-1:0] command_write_jump_address_i,
 
 	input logic start_valid_i,
@@ -38,7 +37,6 @@ module lpu_program_loader #(
 	output logic transaction_image_first_o,
 	output logic transaction_image_last_o,
 	output logic [15:0] transaction_expected_word_count_o,
-	output logic [15:0] transaction_sequence_id_o,
 	output logic [7:0] transaction_dma_id_o,
 
 	output logic commit_valid_o,
@@ -46,7 +44,6 @@ module lpu_program_loader #(
 	output logic [1:0] commit_hemisphere_o,
 	output logic [3:0] commit_target_kind_o,
 	output logic [7:0] commit_queue_id_o,
-	output logic [15:0] commit_sequence_id_o,
 
 	input logic load_pipeline_idle_i,
 
@@ -58,7 +55,7 @@ module lpu_program_loader #(
 );
 	import lpu_program_load_pkg::*;
 
-	localparam integer COMMAND_RECORD_WIDTH = 166 + COMMAND_ADDRESS_WIDTH;
+	localparam integer COMMAND_RECORD_WIDTH = 150 + COMMAND_ADDRESS_WIDTH;
 
 	logic [COMMAND_RECORD_WIDTH-1:0] command_mem_q [0:COMMAND_DEPTH-1];
 	logic [COMMAND_RECORD_WIDTH-1:0] command_write_record_w;
@@ -75,7 +72,6 @@ module lpu_program_loader #(
 	logic active_image_first_w;
 	logic active_image_last_w;
 	logic [15:0] active_expected_word_count_w;
-	logic [15:0] active_sequence_id_w;
 	logic [COMMAND_ADDRESS_WIDTH-1:0] active_jump_address_w;
 
 	logic [COMMAND_ADDRESS_WIDTH-1:0] command_pc_q;
@@ -115,7 +111,6 @@ module lpu_program_loader #(
 		command_write_image_first_i,
 		command_write_image_last_i,
 		command_write_expected_word_count_i,
-		command_write_sequence_id_i,
 		command_write_jump_address_i
 	};
 
@@ -131,7 +126,6 @@ module lpu_program_loader #(
 		active_image_first_w,
 		active_image_last_w,
 		active_expected_word_count_w,
-		active_sequence_id_w,
 		active_jump_address_w
 	} = active_record_q;
 
@@ -157,7 +151,6 @@ module lpu_program_loader #(
 	assign transaction_image_first_o = active_image_first_w;
 	assign transaction_image_last_o = active_image_last_w;
 	assign transaction_expected_word_count_o = active_expected_word_count_w;
-	assign transaction_sequence_id_o = active_sequence_id_w;
 	assign transaction_dma_id_o = next_dma_id_q;
 
 	assign commit_valid_o = active_valid_q &&
@@ -166,7 +159,6 @@ module lpu_program_loader #(
 	assign commit_hemisphere_o = active_hemisphere_w;
 	assign commit_target_kind_o = active_target_kind_w;
 	assign commit_queue_id_o = active_queue_id_w;
-	assign commit_sequence_id_o = active_sequence_id_w;
 
 	assign jump_invalid_w = active_valid_q &&
 		(active_opcode_w == PROGRAM_LOADER_JUMP) &&

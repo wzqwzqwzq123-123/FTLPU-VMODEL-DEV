@@ -25,7 +25,6 @@ module lpu_program_control_system #(
 	input logic command_write_image_first_i,
 	input logic command_write_image_last_i,
 	input logic [15:0] command_write_expected_word_count_i,
-	input logic [15:0] command_write_sequence_id_i,
 	input logic [COMMAND_ADDRESS_WIDTH-1:0] command_write_jump_address_i,
 
 	input logic load_start_valid_i,
@@ -60,17 +59,15 @@ module lpu_program_control_system #(
 	// ICU owns DMA/reassembly/routing; FU subsystems own every local iMEM and execution frontend.
 	output logic [1:0] endpoint_load_valid_o,
 	input logic [1:0] endpoint_load_ready_i,
-	output logic [5:0] endpoint_load_command_o,
+	output logic [5:0] endpoint_load_control_o,
 	output logic [255:0] endpoint_load_data_o,
-	output logic [31:0] endpoint_load_strb_o,
+	output logic [7:0] endpoint_load_strb_o,
 	output logic [7:0] endpoint_load_target_kind_o,
 	output logic [15:0] endpoint_load_queue_id_o,
 	output logic [33:0] endpoint_load_imem_address_o,
 	output logic [1:0] endpoint_load_last_o,
-	output logic [31:0] endpoint_load_sequence_id_o,
 	input logic [1:0] endpoint_commit_valid_i,
 	output logic [1:0] endpoint_commit_ready_o,
-	input logic [31:0] endpoint_commit_sequence_id_i,
 	input logic [1:0] endpoint_commit_error_i,
 	output logic endpoint_program_start_o,
 	input logic endpoint_program_start_ready_i,
@@ -95,45 +92,41 @@ module lpu_program_control_system #(
 	logic descriptor_duplicate_w;
 	logic descriptor_fault_q;
 
-	logic [207:0] mem_target_seen_q;
+	logic [103:0] mem_target_seen_q;
 	logic [3:0] mxm_load_target_seen_q;
 	logic [3:0] mxm_dequant_target_seen_q;
 	logic [3:0] mxm_compute_target_seen_q;
 
 	logic west_load_valid;
 	logic west_load_ready;
-	logic [2:0] west_load_command;
+	logic [2:0] west_load_control;
 	logic [127:0] west_load_data;
-	logic [15:0] west_load_strb;
+	logic [3:0] west_load_strb;
 	logic [3:0] west_load_target_kind;
 	logic [7:0] west_load_queue_id;
 	logic [16:0] west_load_imem_address;
 	logic west_load_last;
-	logic [15:0] west_load_sequence_id;
 	logic east_load_valid;
 	logic east_load_ready;
-	logic [2:0] east_load_command;
+	logic [2:0] east_load_control;
 	logic [127:0] east_load_data;
-	logic [15:0] east_load_strb;
+	logic [3:0] east_load_strb;
 	logic [3:0] east_load_target_kind;
 	logic [7:0] east_load_queue_id;
 	logic [16:0] east_load_imem_address;
 	logic east_load_last;
-	logic [15:0] east_load_sequence_id;
 
 	logic [1:0] cluster_load_valid;
 	logic [1:0] cluster_load_ready;
-	logic [5:0] cluster_load_command;
+	logic [5:0] cluster_load_control;
 	logic [255:0] cluster_load_data;
-	logic [31:0] cluster_load_strb;
+	logic [7:0] cluster_load_strb;
 	logic [7:0] cluster_load_target_kind;
 	logic [15:0] cluster_load_queue_id;
 	logic [33:0] cluster_load_imem_address;
 	logic [1:0] cluster_load_last;
-	logic [31:0] cluster_load_sequence_id;
 	logic [1:0] cluster_commit_valid;
 	logic [1:0] cluster_commit_ready;
-	logic [31:0] cluster_commit_sequence_id;
 	logic [1:0] cluster_commit_error;
 
 	logic instruction_load_done;
@@ -172,15 +165,15 @@ module lpu_program_control_system #(
 		command_target_valid_w = 1'b0;
 		case(command_write_target_kind_i)
 			PROGRAM_TARGET_MEM: begin
-				if(command_write_global_queue_id_i < 8'd208)begin
+				if(command_write_global_queue_id_i < 8'd104)begin
 					command_target_valid_w = 1'b1;
-					if(command_write_global_queue_id_i < 8'd104)begin
+					if(command_write_global_queue_id_i < 8'd52)begin
 						command_hemisphere_w = PROGRAM_HEMISPHERE_EAST;
 						command_local_queue_w = command_write_global_queue_id_i;
 					end
 					else begin
 						command_hemisphere_w = PROGRAM_HEMISPHERE_WEST;
-						command_local_queue_w = command_write_global_queue_id_i - 8'd104;
+						command_local_queue_w = command_write_global_queue_id_i - 8'd52;
 					end
 				end
 			end
@@ -236,28 +229,25 @@ module lpu_program_control_system #(
 
 	assign cluster_load_valid = {west_load_valid, east_load_valid};
 	assign {west_load_ready, east_load_ready} = cluster_load_ready;
-	assign cluster_load_command = {west_load_command, east_load_command};
+	assign cluster_load_control = {west_load_control, east_load_control};
 	assign cluster_load_data = {west_load_data, east_load_data};
 	assign cluster_load_strb = {west_load_strb, east_load_strb};
 	assign cluster_load_target_kind = {west_load_target_kind, east_load_target_kind};
 	assign cluster_load_queue_id = {west_load_queue_id, east_load_queue_id};
 	assign cluster_load_imem_address = {west_load_imem_address, east_load_imem_address};
 	assign cluster_load_last = {west_load_last, east_load_last};
-	assign cluster_load_sequence_id = {west_load_sequence_id, east_load_sequence_id};
 	assign cluster_commit_ready = {west_commit_ready, east_commit_ready};
 	assign endpoint_load_valid_o = cluster_load_valid;
 	assign cluster_load_ready = endpoint_load_ready_i;
-	assign endpoint_load_command_o = cluster_load_command;
+	assign endpoint_load_control_o = cluster_load_control;
 	assign endpoint_load_data_o = cluster_load_data;
 	assign endpoint_load_strb_o = cluster_load_strb;
 	assign endpoint_load_target_kind_o = cluster_load_target_kind;
 	assign endpoint_load_queue_id_o = cluster_load_queue_id;
 	assign endpoint_load_imem_address_o = cluster_load_imem_address;
 	assign endpoint_load_last_o = cluster_load_last;
-	assign endpoint_load_sequence_id_o = cluster_load_sequence_id;
 	assign cluster_commit_valid = endpoint_commit_valid_i;
 	assign endpoint_commit_ready_o = cluster_commit_ready;
-	assign cluster_commit_sequence_id = endpoint_commit_sequence_id_i;
 	assign cluster_commit_error = endpoint_commit_error_i;
 	assign endpoint_program_start_o = loader_program_start;
 	assign cluster_start_ready = endpoint_program_start_ready_i;
@@ -302,7 +292,6 @@ module lpu_program_control_system #(
 		.command_write_image_first_i,
 		.command_write_image_last_i,
 		.command_write_expected_word_count_i,
-		.command_write_sequence_id_i,
 		.command_write_jump_address_i,
 		.start_valid_i(load_start_valid_i && load_start_ready_o),
 		.start_ready_o(loader_start_ready),
@@ -321,31 +310,27 @@ module lpu_program_control_system #(
 		.dma_rsp_error_i,
 		.west_load_valid_o(west_load_valid),
 		.west_load_ready_i(west_load_ready),
-		.west_load_command_o(west_load_command),
+		.west_load_control_o(west_load_control),
 		.west_load_data_o(west_load_data),
 		.west_load_strb_o(west_load_strb),
 		.west_load_target_kind_o(west_load_target_kind),
 		.west_load_queue_id_o(west_load_queue_id),
 		.west_load_imem_address_o(west_load_imem_address),
 		.west_load_last_o(west_load_last),
-		.west_load_sequence_id_o(west_load_sequence_id),
 		.east_load_valid_o(east_load_valid),
 		.east_load_ready_i(east_load_ready),
-		.east_load_command_o(east_load_command),
+		.east_load_control_o(east_load_control),
 		.east_load_data_o(east_load_data),
 		.east_load_strb_o(east_load_strb),
 		.east_load_target_kind_o(east_load_target_kind),
 		.east_load_queue_id_o(east_load_queue_id),
 		.east_load_imem_address_o(east_load_imem_address),
 		.east_load_last_o(east_load_last),
-		.east_load_sequence_id_o(east_load_sequence_id),
 		.west_commit_valid_i(cluster_commit_valid[1]),
 		.west_commit_ready_o(west_commit_ready),
-		.west_commit_sequence_id_i(cluster_commit_sequence_id[16+:16]),
 		.west_commit_error_i(cluster_commit_error[1]),
 		.east_commit_valid_i(cluster_commit_valid[0]),
 		.east_commit_ready_o(east_commit_ready),
-		.east_commit_sequence_id_i(cluster_commit_sequence_id[0+:16]),
 		.east_commit_error_i(cluster_commit_error[0]),
 		.weight_load_done_i(start_pending_q && dependencies_ready_i),
 		.all_frontends_ready_i(cluster_frontends_ready),
