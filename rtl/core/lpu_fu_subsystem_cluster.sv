@@ -489,7 +489,6 @@ module lpu_fu_subsystem_cluster #(
 				.west_inner_valid_o(sxm_west_valid), .west_inner_data_o(sxm_west_data),
 				.fault_o(sxm_fault), .conflict_o(sxm_stream_conflict)
 			);
-
 			for(genvar local_mxm_gen = 0; local_mxm_gen < 2; local_mxm_gen = local_mxm_gen + 1)begin : gen_mxm
 				localparam integer MXM_INDEX = HEMISPHERE_INDEX*2 + local_mxm_gen;
 				lpu_mxm_subsystem #(
