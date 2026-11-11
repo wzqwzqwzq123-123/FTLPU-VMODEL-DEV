@@ -21,9 +21,8 @@ module lpu_program_load_subsystem #(
 	input logic [2:0] command_write_opcode_i,
 	input logic [63:0] command_write_source_address_i,
 	input logic [31:0] command_write_byte_count_i,
-	input logic [1:0] command_write_hemisphere_i,
-	input logic [3:0] command_write_target_kind_i,
-	input logic [7:0] command_write_queue_id_i,
+	input logic [1:0] command_write_scope_i,
+	input logic [11:0] command_write_destination_i,
 	input logic [1:0] command_write_format_i,
 	input logic [16:0] command_write_imem_base_address_i,
 	input logic command_write_image_first_i,
@@ -54,8 +53,7 @@ module lpu_program_load_subsystem #(
 	output logic [2:0] west_load_control_o,
 	output logic [127:0] west_load_data_o,
 	output logic [3:0] west_load_strb_o,
-	output logic [3:0] west_load_target_kind_o,
-	output logic [7:0] west_load_queue_id_o,
+	output logic [11:0] west_load_destination_o,
 	output logic [16:0] west_load_imem_address_o,
 	output logic west_load_last_o,
 
@@ -64,8 +62,7 @@ module lpu_program_load_subsystem #(
 	output logic [2:0] east_load_control_o,
 	output logic [127:0] east_load_data_o,
 	output logic [3:0] east_load_strb_o,
-	output logic [3:0] east_load_target_kind_o,
-	output logic [7:0] east_load_queue_id_o,
+	output logic [11:0] east_load_destination_o,
 	output logic [16:0] east_load_imem_address_o,
 	output logic east_load_last_o,
 
@@ -96,9 +93,8 @@ module lpu_program_load_subsystem #(
 	logic loader_transaction_ready;
 	logic [63:0] loader_source_address;
 	logic [31:0] loader_byte_count;
-	logic [1:0] loader_hemisphere;
-	logic [3:0] loader_target_kind;
-	logic [7:0] loader_queue_id;
+	logic [1:0] loader_scope;
+	logic [11:0] loader_destination;
 	logic [1:0] loader_format;
 	logic [16:0] loader_imem_base_address;
 	logic loader_image_first;
@@ -107,9 +103,8 @@ module lpu_program_load_subsystem #(
 	logic [7:0] loader_dma_id;
 	logic loader_commit_valid;
 	logic loader_commit_ready;
-	logic [1:0] loader_commit_hemisphere;
-	logic [3:0] loader_commit_target_kind;
-	logic [7:0] loader_commit_queue_id;
+	logic [1:0] loader_commit_scope;
+	logic [11:0] loader_commit_destination;
 	logic loader_busy;
 	logic loader_done;
 	logic loader_fault;
@@ -122,9 +117,8 @@ module lpu_program_load_subsystem #(
 	logic config_dequeue_ready;
 	logic [63:0] config_source_address;
 	logic [31:0] config_byte_count;
-	logic [1:0] config_hemisphere;
-	logic [3:0] config_target_kind;
-	logic [7:0] config_queue_id;
+	logic [1:0] config_scope;
+	logic [11:0] config_destination;
 	logic [1:0] config_format;
 	logic [16:0] config_imem_base_address;
 	logic config_image_first;
@@ -153,9 +147,8 @@ module lpu_program_load_subsystem #(
 	logic reassembler_word_ready;
 	logic [127:0] reassembler_word_data;
 	logic [3:0] reassembler_word_strb;
-	logic [1:0] reassembler_word_hemisphere;
-	logic [3:0] reassembler_word_target_kind;
-	logic [7:0] reassembler_word_queue_id;
+	logic [1:0] reassembler_word_scope;
+	logic [11:0] reassembler_word_destination;
 	logic [16:0] reassembler_word_imem_address;
 	logic reassembler_word_last;
 	logic reassembler_idle;
@@ -167,9 +160,8 @@ module lpu_program_load_subsystem #(
 	logic word_dequeue_ready;
 	logic [127:0] word_dequeue_data;
 	logic [3:0] word_dequeue_strb;
-	logic [1:0] word_dequeue_hemisphere;
-	logic [3:0] word_dequeue_target_kind;
-	logic [7:0] word_dequeue_queue_id;
+	logic [1:0] word_dequeue_scope;
+	logic [11:0] word_dequeue_destination;
 	logic [16:0] word_dequeue_imem_address;
 	logic word_dequeue_last;
 	logic word_fifo_empty;
@@ -178,9 +170,8 @@ module lpu_program_load_subsystem #(
 	logic [2:0] distributor_input_control;
 	logic [127:0] distributor_input_data;
 	logic [3:0] distributor_input_strb;
-	logic [1:0] distributor_input_hemisphere;
-	logic [3:0] distributor_input_target_kind;
-	logic [7:0] distributor_input_queue_id;
+	logic [1:0] distributor_input_scope;
+	logic [11:0] distributor_input_destination;
 	logic [16:0] distributor_input_imem_address;
 	logic distributor_input_last;
 	logic commit_select_w;
@@ -193,9 +184,8 @@ module lpu_program_load_subsystem #(
 	logic prime_dequeue_valid;
 	logic prime_dequeue_ready;
 	logic [13:0] prime_dequeue_data;
-	logic [1:0] prime_dequeue_hemisphere;
-	logic [3:0] prime_dequeue_target_kind;
-	logic [7:0] prime_dequeue_queue_id;
+	logic [1:0] prime_dequeue_scope;
+	logic [11:0] prime_dequeue_destination;
 	logic [$clog2(PRIME_FIFO_DEPTH+1)-1:0] prime_fifo_level;
 
 	// Distributor internal branches are gated by commit-scoreboard capacity before reaching targets.
@@ -204,9 +194,7 @@ module lpu_program_load_subsystem #(
 	logic [2:0] distributor_west_control;
 	logic [127:0] distributor_west_data;
 	logic [3:0] distributor_west_strb;
-	logic [1:0] distributor_west_hemisphere;
-	logic [3:0] distributor_west_target_kind;
-	logic [7:0] distributor_west_queue_id;
+	logic [11:0] distributor_west_destination;
 	logic [16:0] distributor_west_imem_address;
 	logic distributor_west_last;
 	logic distributor_east_valid;
@@ -214,9 +202,7 @@ module lpu_program_load_subsystem #(
 	logic [2:0] distributor_east_control;
 	logic [127:0] distributor_east_data;
 	logic [3:0] distributor_east_strb;
-	logic [1:0] distributor_east_hemisphere;
-	logic [3:0] distributor_east_target_kind;
-	logic [7:0] distributor_east_queue_id;
+	logic [11:0] distributor_east_destination;
 	logic [16:0] distributor_east_imem_address;
 	logic distributor_east_last;
 	logic distributor_idle;
@@ -261,9 +247,8 @@ module lpu_program_load_subsystem #(
 		.command_write_opcode_i,
 		.command_write_source_address_i,
 		.command_write_byte_count_i,
-		.command_write_hemisphere_i,
-		.command_write_target_kind_i,
-		.command_write_queue_id_i,
+		.command_write_scope_i,
+		.command_write_destination_i,
 		.command_write_format_i,
 		.command_write_imem_base_address_i,
 		.command_write_image_first_i,
@@ -277,9 +262,8 @@ module lpu_program_load_subsystem #(
 		.transaction_ready_i(loader_transaction_ready),
 		.transaction_source_address_o(loader_source_address),
 		.transaction_byte_count_o(loader_byte_count),
-		.transaction_hemisphere_o(loader_hemisphere),
-		.transaction_target_kind_o(loader_target_kind),
-		.transaction_queue_id_o(loader_queue_id),
+		.transaction_scope_o(loader_scope),
+		.transaction_destination_o(loader_destination),
 		.transaction_format_o(loader_format),
 		.transaction_imem_base_address_o(loader_imem_base_address),
 		.transaction_image_first_o(loader_image_first),
@@ -288,9 +272,8 @@ module lpu_program_load_subsystem #(
 		.transaction_dma_id_o(loader_dma_id),
 		.commit_valid_o(loader_commit_valid),
 		.commit_ready_i(loader_commit_ready),
-		.commit_hemisphere_o(loader_commit_hemisphere),
-		.commit_target_kind_o(loader_commit_target_kind),
-		.commit_queue_id_o(loader_commit_queue_id),
+		.commit_scope_o(loader_commit_scope),
+		.commit_destination_o(loader_commit_destination),
 		.load_pipeline_idle_i(load_pipeline_idle_w),
 		.command_pc_o(),
 		.busy_o(loader_busy),
@@ -313,9 +296,8 @@ module lpu_program_load_subsystem #(
 		.enqueue_ready_o(config_enqueue_ready),
 		.enqueue_source_address_i(loader_source_address),
 		.enqueue_byte_count_i(loader_byte_count),
-		.enqueue_hemisphere_i(loader_hemisphere),
-		.enqueue_target_kind_i(loader_target_kind),
-		.enqueue_queue_id_i(loader_queue_id),
+		.enqueue_scope_i(loader_scope),
+		.enqueue_destination_i(loader_destination),
 		.enqueue_format_i(loader_format),
 		.enqueue_imem_base_address_i(loader_imem_base_address),
 		.enqueue_image_first_i(loader_image_first),
@@ -326,9 +308,8 @@ module lpu_program_load_subsystem #(
 		.dequeue_ready_i(config_dequeue_ready),
 		.dequeue_source_address_o(config_source_address),
 		.dequeue_byte_count_o(config_byte_count),
-		.dequeue_hemisphere_o(config_hemisphere),
-		.dequeue_target_kind_o(config_target_kind),
-		.dequeue_queue_id_o(config_queue_id),
+		.dequeue_scope_o(config_scope),
+		.dequeue_destination_o(config_destination),
 		.dequeue_format_o(config_format),
 		.dequeue_imem_base_address_o(config_imem_base_address),
 		.dequeue_image_first_o(config_image_first),
@@ -388,9 +369,8 @@ module lpu_program_load_subsystem #(
 		.config_valid_i(config_dequeue_valid),
 		.config_ready_o(config_dequeue_ready),
 		.config_byte_count_i(config_byte_count),
-		.config_hemisphere_i(config_hemisphere),
-		.config_target_kind_i(config_target_kind),
-		.config_queue_id_i(config_queue_id),
+		.config_scope_i(config_scope),
+		.config_destination_i(config_destination),
 		.config_format_i(config_format),
 		.config_imem_base_address_i(config_imem_base_address),
 		.config_image_first_i(config_image_first),
@@ -408,9 +388,8 @@ module lpu_program_load_subsystem #(
 		.word_ready_i(reassembler_word_ready),
 		.word_data_o(reassembler_word_data),
 		.word_strb_o(reassembler_word_strb),
-		.word_hemisphere_o(reassembler_word_hemisphere),
-		.word_target_kind_o(reassembler_word_target_kind),
-		.word_queue_id_o(reassembler_word_queue_id),
+		.word_scope_o(reassembler_word_scope),
+		.word_destination_o(reassembler_word_destination),
 		.word_imem_address_o(reassembler_word_imem_address),
 		.word_image_last_o(reassembler_word_last),
 		.received_byte_count_o(),
@@ -429,18 +408,16 @@ module lpu_program_load_subsystem #(
 		.enqueue_ready_o(reassembler_word_ready),
 		.enqueue_data_i(reassembler_word_data),
 		.enqueue_strb_i(reassembler_word_strb),
-		.enqueue_hemisphere_i(reassembler_word_hemisphere),
-		.enqueue_target_kind_i(reassembler_word_target_kind),
-		.enqueue_queue_id_i(reassembler_word_queue_id),
+		.enqueue_scope_i(reassembler_word_scope),
+		.enqueue_destination_i(reassembler_word_destination),
 		.enqueue_imem_address_i(reassembler_word_imem_address),
 		.enqueue_last_i(reassembler_word_last),
 		.dequeue_valid_o(word_dequeue_valid),
 		.dequeue_ready_i(word_dequeue_ready),
 		.dequeue_data_o(word_dequeue_data),
 		.dequeue_strb_o(word_dequeue_strb),
-		.dequeue_hemisphere_o(word_dequeue_hemisphere),
-		.dequeue_target_kind_o(word_dequeue_target_kind),
-		.dequeue_queue_id_o(word_dequeue_queue_id),
+		.dequeue_scope_o(word_dequeue_scope),
+		.dequeue_destination_o(word_dequeue_destination),
 		.dequeue_imem_address_o(word_dequeue_imem_address),
 		.dequeue_last_o(word_dequeue_last),
 		.level_o(),
@@ -453,8 +430,7 @@ module lpu_program_load_subsystem #(
 	assign commit_select_w = loader_commit_valid && load_pipeline_idle_w;
 	assign loader_commit_ready = commit_select_w && prime_enqueue_ready;
 	assign prime_enqueue_valid = commit_select_w;
-	assign prime_enqueue_data = {loader_commit_hemisphere, loader_commit_target_kind,
-		loader_commit_queue_id};
+	assign prime_enqueue_data = {loader_commit_scope, loader_commit_destination};
 
 	lpu_queue_fifo #(
 		.DATA_WIDTH(14),
@@ -471,16 +447,14 @@ module lpu_program_load_subsystem #(
 		.level_o(prime_fifo_level)
 	);
 
-	assign {prime_dequeue_hemisphere, prime_dequeue_target_kind,
-		prime_dequeue_queue_id} = prime_dequeue_data;
+	assign {prime_dequeue_scope, prime_dequeue_destination} = prime_dequeue_data;
 	assign prime_select_w = instruction_load_done_q && prime_dequeue_valid;
 	assign distributor_input_valid = prime_select_w ? prime_dequeue_valid : word_dequeue_valid;
 	assign distributor_input_control = prime_select_w ? PROGRAM_LOAD_PRIME : PROGRAM_LOAD_WRITE;
 	assign distributor_input_data = prime_select_w ? 128'd0 : word_dequeue_data;
 	assign distributor_input_strb = prime_select_w ? 4'd0 : word_dequeue_strb;
-	assign distributor_input_hemisphere = prime_select_w ? prime_dequeue_hemisphere : word_dequeue_hemisphere;
-	assign distributor_input_target_kind = prime_select_w ? prime_dequeue_target_kind : word_dequeue_target_kind;
-	assign distributor_input_queue_id = prime_select_w ? prime_dequeue_queue_id : word_dequeue_queue_id;
+	assign distributor_input_scope = prime_select_w ? prime_dequeue_scope : word_dequeue_scope;
+	assign distributor_input_destination = prime_select_w ? prime_dequeue_destination : word_dequeue_destination;
 	assign distributor_input_imem_address = prime_select_w ? 17'd0 : word_dequeue_imem_address;
 	assign distributor_input_last = prime_select_w ? 1'b1 : word_dequeue_last;
 	assign prime_dequeue_ready = prime_select_w && distributor_input_ready;
@@ -494,9 +468,8 @@ module lpu_program_load_subsystem #(
 		.input_control_i(distributor_input_control),
 		.input_data_i(distributor_input_data),
 		.input_strb_i(distributor_input_strb),
-		.input_hemisphere_i(distributor_input_hemisphere),
-		.input_target_kind_i(distributor_input_target_kind),
-		.input_queue_id_i(distributor_input_queue_id),
+		.input_scope_i(distributor_input_scope),
+		.input_destination_i(distributor_input_destination),
 		.input_imem_address_i(distributor_input_imem_address),
 		.input_last_i(distributor_input_last),
 		.west_valid_o(distributor_west_valid),
@@ -504,9 +477,7 @@ module lpu_program_load_subsystem #(
 		.west_control_o(distributor_west_control),
 		.west_data_o(distributor_west_data),
 		.west_strb_o(distributor_west_strb),
-		.west_hemisphere_o(distributor_west_hemisphere),
-		.west_target_kind_o(distributor_west_target_kind),
-		.west_queue_id_o(distributor_west_queue_id),
+		.west_destination_o(distributor_west_destination),
 		.west_imem_address_o(distributor_west_imem_address),
 		.west_last_o(distributor_west_last),
 		.east_valid_o(distributor_east_valid),
@@ -514,9 +485,7 @@ module lpu_program_load_subsystem #(
 		.east_control_o(distributor_east_control),
 		.east_data_o(distributor_east_data),
 		.east_strb_o(distributor_east_strb),
-		.east_hemisphere_o(distributor_east_hemisphere),
-		.east_target_kind_o(distributor_east_target_kind),
-		.east_queue_id_o(distributor_east_queue_id),
+		.east_destination_o(distributor_east_destination),
 		.east_imem_address_o(distributor_east_imem_address),
 		.east_last_o(distributor_east_last),
 		.idle_o(distributor_idle),
@@ -531,8 +500,7 @@ module lpu_program_load_subsystem #(
 	assign west_load_control_o = distributor_west_control;
 	assign west_load_data_o = distributor_west_data;
 	assign west_load_strb_o = distributor_west_strb;
-	assign west_load_target_kind_o = distributor_west_target_kind;
-	assign west_load_queue_id_o = distributor_west_queue_id;
+	assign west_load_destination_o = distributor_west_destination;
 	assign west_load_imem_address_o = distributor_west_imem_address;
 	assign west_load_last_o = distributor_west_last;
 	assign west_bus_fire = west_load_valid_o && west_load_ready_i;
@@ -544,8 +512,7 @@ module lpu_program_load_subsystem #(
 	assign east_load_control_o = distributor_east_control;
 	assign east_load_data_o = distributor_east_data;
 	assign east_load_strb_o = distributor_east_strb;
-	assign east_load_target_kind_o = distributor_east_target_kind;
-	assign east_load_queue_id_o = distributor_east_queue_id;
+	assign east_load_destination_o = distributor_east_destination;
 	assign east_load_imem_address_o = distributor_east_imem_address;
 	assign east_load_last_o = distributor_east_last;
 	assign east_bus_fire = east_load_valid_o && east_load_ready_i;

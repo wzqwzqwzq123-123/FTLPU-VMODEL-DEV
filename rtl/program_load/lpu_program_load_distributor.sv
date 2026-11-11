@@ -9,9 +9,8 @@ module lpu_program_load_distributor #(
 	input logic [2:0] input_control_i,
 	input logic [127:0] input_data_i,
 	input logic [3:0] input_strb_i,
-	input logic [1:0] input_hemisphere_i,
-	input logic [3:0] input_target_kind_i,
-	input logic [7:0] input_queue_id_i,
+	input logic [1:0] input_scope_i,
+	input logic [11:0] input_destination_i,
 	input logic [16:0] input_imem_address_i,
 	input logic input_last_i,
 
@@ -20,9 +19,7 @@ module lpu_program_load_distributor #(
 	output logic [2:0] west_control_o,
 	output logic [127:0] west_data_o,
 	output logic [3:0] west_strb_o,
-	output logic [1:0] west_hemisphere_o,
-	output logic [3:0] west_target_kind_o,
-	output logic [7:0] west_queue_id_o,
+	output logic [11:0] west_destination_o,
 	output logic [16:0] west_imem_address_o,
 	output logic west_last_o,
 
@@ -31,9 +28,7 @@ module lpu_program_load_distributor #(
 	output logic [2:0] east_control_o,
 	output logic [127:0] east_data_o,
 	output logic [3:0] east_strb_o,
-	output logic [1:0] east_hemisphere_o,
-	output logic [3:0] east_target_kind_o,
-	output logic [7:0] east_queue_id_o,
+	output logic [11:0] east_destination_o,
 	output logic [16:0] east_imem_address_o,
 	output logic east_last_o,
 
@@ -48,9 +43,8 @@ module lpu_program_load_distributor #(
 	logic [2:0] head_control;
 	logic [127:0] head_data;
 	logic [3:0] head_strb;
-	logic [1:0] head_hemisphere;
-	logic [3:0] head_target_kind;
-	logic [7:0] head_queue_id;
+	logic [1:0] head_scope;
+	logic [11:0] head_destination;
 	logic [16:0] head_imem_address;
 	logic head_last;
 	logic elastic_idle;
@@ -63,6 +57,8 @@ module lpu_program_load_distributor #(
 	logic east_fire;
 	logic west_complete_w;
 	logic east_complete_w;
+	logic scope_invalid_w;
+	logic scope_mismatch_w;
 	logic route_invalid_w;
 	logic fault_q;
 
@@ -76,9 +72,8 @@ module lpu_program_load_distributor #(
 		.input_control_i,
 		.input_data_i,
 		.input_strb_i,
-		.input_hemisphere_i,
-		.input_target_kind_i,
-		.input_queue_id_i,
+		.input_scope_i,
+		.input_destination_i,
 		.input_imem_address_i,
 		.input_last_i,
 		.output_valid_o(head_valid),
@@ -86,20 +81,25 @@ module lpu_program_load_distributor #(
 		.output_control_o(head_control),
 		.output_data_o(head_data),
 		.output_strb_o(head_strb),
-		.output_hemisphere_o(head_hemisphere),
-		.output_target_kind_o(head_target_kind),
-		.output_queue_id_o(head_queue_id),
+		.output_scope_o(head_scope),
+		.output_destination_o(head_destination),
 		.output_imem_address_o(head_imem_address),
 		.output_last_o(head_last),
 		.level_o(),
 		.idle_o(elastic_idle)
 	);
 
-	assign west_required_w = (head_hemisphere == PROGRAM_HEMISPHERE_WEST) ||
-		(head_hemisphere == PROGRAM_HEMISPHERE_BOTH);
-	assign east_required_w = (head_hemisphere == PROGRAM_HEMISPHERE_EAST) ||
-		(head_hemisphere == PROGRAM_HEMISPHERE_BOTH);
-	assign route_invalid_w = head_valid && !west_required_w && !east_required_w;
+	assign west_required_w = (head_scope == PROGRAM_SCOPE_WEST) ||
+		(head_scope == PROGRAM_SCOPE_BOTH);
+	assign east_required_w = (head_scope == PROGRAM_SCOPE_EAST) ||
+		(head_scope == PROGRAM_SCOPE_BOTH);
+	assign scope_invalid_w = (head_scope != PROGRAM_SCOPE_EAST) &&
+		(head_scope != PROGRAM_SCOPE_WEST) && (head_scope != PROGRAM_SCOPE_BOTH);
+	assign scope_mismatch_w = ((head_scope == PROGRAM_SCOPE_EAST) &&
+		(head_destination[PROGRAM_DESTINATION_HEMISPHERE_BIT] != PROGRAM_HEMISPHERE_EAST)) ||
+		((head_scope == PROGRAM_SCOPE_WEST) &&
+		 (head_destination[PROGRAM_DESTINATION_HEMISPHERE_BIT] != PROGRAM_HEMISPHERE_WEST));
+	assign route_invalid_w = head_valid && (scope_invalid_w || scope_mismatch_w);
 
 	assign west_valid_o = head_valid && west_required_w && !west_done_q && !fault_q;
 	assign east_valid_o = head_valid && east_required_w && !east_done_q && !fault_q;
@@ -107,23 +107,22 @@ module lpu_program_load_distributor #(
 	assign east_fire = east_valid_o && east_ready_i;
 	assign west_complete_w = !west_required_w || west_done_q || west_fire;
 	assign east_complete_w = !east_required_w || east_done_q || east_fire;
-	assign head_ready = head_valid && west_complete_w && east_complete_w && !route_invalid_w && !fault_q;
+	assign head_ready = head_valid && (route_invalid_w ||
+		(west_complete_w && east_complete_w && !fault_q));
 
 	assign west_control_o = head_control;
 	assign west_data_o = head_data;
 	assign west_strb_o = head_strb;
-	assign west_hemisphere_o = head_hemisphere;
-	assign west_target_kind_o = head_target_kind;
-	assign west_queue_id_o = head_queue_id;
+	assign west_destination_o = {PROGRAM_HEMISPHERE_WEST,
+		head_destination[PROGRAM_DESTINATION_KIND_MSB:PROGRAM_DESTINATION_INDEX_LSB]};
 	assign west_imem_address_o = head_imem_address;
 	assign west_last_o = head_last;
 
 	assign east_control_o = head_control;
 	assign east_data_o = head_data;
 	assign east_strb_o = head_strb;
-	assign east_hemisphere_o = head_hemisphere;
-	assign east_target_kind_o = head_target_kind;
-	assign east_queue_id_o = head_queue_id;
+	assign east_destination_o = {PROGRAM_HEMISPHERE_EAST,
+		head_destination[PROGRAM_DESTINATION_KIND_MSB:PROGRAM_DESTINATION_INDEX_LSB]};
 	assign east_imem_address_o = head_imem_address;
 	assign east_last_o = head_last;
 

@@ -8,9 +8,8 @@ module lpu_program_word_fifo #(
 	output logic enqueue_ready_o,
 	input logic [127:0] enqueue_data_i,
 	input logic [3:0] enqueue_strb_i,
-	input logic [1:0] enqueue_hemisphere_i,
-	input logic [3:0] enqueue_target_kind_i,
-	input logic [7:0] enqueue_queue_id_i,
+	input logic [1:0] enqueue_scope_i,
+	input logic [11:0] enqueue_destination_i,
 	input logic [16:0] enqueue_imem_address_i,
 	input logic enqueue_last_i,
 
@@ -18,9 +17,8 @@ module lpu_program_word_fifo #(
 	input logic dequeue_ready_i,
 	output logic [127:0] dequeue_data_o,
 	output logic [3:0] dequeue_strb_o,
-	output logic [1:0] dequeue_hemisphere_o,
-	output logic [3:0] dequeue_target_kind_o,
-	output logic [7:0] dequeue_queue_id_o,
+	output logic [1:0] dequeue_scope_o,
+	output logic [11:0] dequeue_destination_o,
 	output logic [16:0] dequeue_imem_address_o,
 	output logic dequeue_last_o,
 
@@ -36,18 +34,16 @@ module lpu_program_word_fifo #(
 	assign enqueue_record = {
 		enqueue_data_i,
 		enqueue_strb_i,
-		enqueue_hemisphere_i,
-		enqueue_target_kind_i,
-		enqueue_queue_id_i,
+		enqueue_scope_i,
+		enqueue_destination_i,
 		enqueue_imem_address_i,
 		enqueue_last_i
 	};
 	assign {
 		dequeue_data_o,
 		dequeue_strb_o,
-		dequeue_hemisphere_o,
-		dequeue_target_kind_o,
-		dequeue_queue_id_o,
+		dequeue_scope_o,
+		dequeue_destination_o,
 		dequeue_imem_address_o,
 		dequeue_last_o
 	} = dequeue_record;

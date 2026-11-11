@@ -33,8 +33,7 @@ module lpu_top #(
 	input logic [2:0] program_command_write_opcode_i,
 	input logic [63:0] program_command_write_source_address_i,
 	input logic [31:0] program_command_write_byte_count_i,
-	input logic [3:0] program_command_write_target_kind_i,
-	input logic [7:0] program_command_write_global_queue_id_i,
+	input logic [11:0] program_command_write_destination_i,
 	input logic [1:0] program_command_write_format_i,
 	input logic [1:0] program_command_write_encoding_mode_i,
 	input logic [16:0] program_command_write_imem_base_address_i,
@@ -160,8 +159,7 @@ module lpu_top #(
 	logic [5:0] endpoint_load_control;
 	logic [255:0] endpoint_load_data;
 	logic [7:0] endpoint_load_strb;
-	logic [7:0] endpoint_load_target_kind;
-	logic [15:0] endpoint_load_queue_id;
+	logic [23:0] endpoint_load_destination;
 	logic [33:0] endpoint_load_imem_address;
 	logic [1:0] endpoint_load_last;
 	logic [1:0] endpoint_commit_valid;
@@ -283,7 +281,7 @@ module lpu_top #(
 				.command_write_valid_i(program_command_write_valid_i), .command_write_ready_o(program_command_write_ready_o),
 				.command_write_address_i(program_command_write_address_i), .command_write_opcode_i(program_command_write_opcode_i),
 				.command_write_source_address_i(program_command_write_source_address_i), .command_write_byte_count_i(program_command_write_byte_count_i),
-				.command_write_target_kind_i(program_command_write_target_kind_i), .command_write_global_queue_id_i(program_command_write_global_queue_id_i),
+				.command_write_destination_i(program_command_write_destination_i),
 				.command_write_format_i(program_command_write_format_i), .command_write_encoding_mode_i(program_command_write_encoding_mode_i),
 				.command_write_imem_base_address_i(program_command_write_imem_base_address_i), .command_write_image_first_i(program_command_write_image_first_i),
 				.command_write_image_last_i(program_command_write_image_last_i), .command_write_expected_word_count_i(program_command_write_expected_word_count_i),
@@ -300,8 +298,8 @@ module lpu_top #(
 				.program_fault_o, .program_fault_code_o, .schedule_cycle_o(program_schedule_cycle_o),
 				.endpoint_load_valid_o(endpoint_load_valid), .endpoint_load_ready_i(endpoint_load_ready),
 				.endpoint_load_control_o(endpoint_load_control), .endpoint_load_data_o(endpoint_load_data),
-				.endpoint_load_strb_o(endpoint_load_strb), .endpoint_load_target_kind_o(endpoint_load_target_kind),
-				.endpoint_load_queue_id_o(endpoint_load_queue_id), .endpoint_load_imem_address_o(endpoint_load_imem_address),
+				.endpoint_load_strb_o(endpoint_load_strb), .endpoint_load_destination_o(endpoint_load_destination),
+				.endpoint_load_imem_address_o(endpoint_load_imem_address),
 				.endpoint_load_last_o(endpoint_load_last),
 				.endpoint_commit_valid_i(endpoint_commit_valid), .endpoint_commit_ready_o(endpoint_commit_ready),
 				.endpoint_commit_error_i(endpoint_commit_error),
@@ -331,8 +329,7 @@ module lpu_top #(
 			assign endpoint_load_control = '0;
 			assign endpoint_load_data = '0;
 			assign endpoint_load_strb = '0;
-			assign endpoint_load_target_kind = '0;
-			assign endpoint_load_queue_id = '0;
+			assign endpoint_load_destination = '0;
 			assign endpoint_load_imem_address = '0;
 			assign endpoint_load_last = '0;
 			assign endpoint_commit_ready = '0;
@@ -352,8 +349,8 @@ module lpu_top #(
 		.clk_i, .rst_ni, .program_reset_i, .local_frontend_enable_i(ENABLE_DISTRIBUTED_PROGRAM_FRONTEND),
 		.external_run_i(run_i), .endpoint_load_valid_i(endpoint_load_valid), .endpoint_load_ready_o(endpoint_load_ready),
 		.endpoint_load_control_i(endpoint_load_control), .endpoint_load_data_i(endpoint_load_data),
-		.endpoint_load_strb_i(endpoint_load_strb), .endpoint_load_target_kind_i(endpoint_load_target_kind),
-		.endpoint_load_queue_id_i(endpoint_load_queue_id), .endpoint_load_imem_address_i(endpoint_load_imem_address),
+		.endpoint_load_strb_i(endpoint_load_strb), .endpoint_load_destination_i(endpoint_load_destination),
+		.endpoint_load_imem_address_i(endpoint_load_imem_address),
 		.endpoint_load_last_i(endpoint_load_last),
 		.endpoint_commit_valid_o(endpoint_commit_valid), .endpoint_commit_ready_i(endpoint_commit_ready),
 		.endpoint_commit_error_o(endpoint_commit_error),

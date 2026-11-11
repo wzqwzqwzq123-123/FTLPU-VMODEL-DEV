@@ -1,9 +1,11 @@
 package lpu_program_load_pkg;
 	parameter integer PROGRAM_DDR_ADDRESS_WIDTH = 64;
 	parameter integer PROGRAM_BYTE_COUNT_WIDTH = 32;
-	parameter integer PROGRAM_HEMISPHERE_WIDTH = 2;
-	parameter integer PROGRAM_TARGET_KIND_WIDTH = 4;
-	parameter integer PROGRAM_QUEUE_ID_WIDTH = 8;
+	parameter integer PROGRAM_HEMISPHERE_WIDTH = 1;
+	parameter integer PROGRAM_HEMISPHERE_SCOPE_WIDTH = 2;
+	parameter integer PROGRAM_TARGET_KIND_WIDTH = 3;
+	parameter integer PROGRAM_TARGET_INDEX_WIDTH = 8;
+	parameter integer PROGRAM_DESTINATION_WIDTH = 12;
 	parameter integer PROGRAM_FORMAT_WIDTH = 2;
 	parameter integer PROGRAM_IMEM_ADDRESS_WIDTH = 17;
 	parameter integer PROGRAM_WORD_COUNT_WIDTH = 16;
@@ -19,21 +21,42 @@ package lpu_program_load_pkg;
 		PROGRAM_FORMAT_128 = 2'd1
 	} lpu_program_format_e;
 
+	// A Destination names exactly one physical target. Broadcast remains a separate loader scope.
 	typedef enum logic [PROGRAM_HEMISPHERE_WIDTH-1:0] {
-		PROGRAM_HEMISPHERE_EAST = 2'd0,
-		PROGRAM_HEMISPHERE_WEST = 2'd1,
-		PROGRAM_HEMISPHERE_BOTH = 2'd2
+		PROGRAM_HEMISPHERE_EAST = 1'b0,
+		PROGRAM_HEMISPHERE_WEST = 1'b1
 	} lpu_program_hemisphere_e;
 
+	typedef enum logic [PROGRAM_HEMISPHERE_SCOPE_WIDTH-1:0] {
+		PROGRAM_SCOPE_EAST = 2'd0,
+		PROGRAM_SCOPE_WEST = 2'd1,
+		PROGRAM_SCOPE_BOTH = 2'd2
+	} lpu_program_hemisphere_scope_e;
+
 	typedef enum logic [PROGRAM_TARGET_KIND_WIDTH-1:0] {
-		PROGRAM_TARGET_MEM = 4'd0,
-		PROGRAM_TARGET_MXM_LOAD = 4'd1,
-		PROGRAM_TARGET_MXM_DEQUANT = 4'd2,
-		PROGRAM_TARGET_MXM_COMPUTE = 4'd3,
-		PROGRAM_TARGET_VXM = 4'd4,
-		PROGRAM_TARGET_SXM_TRANSPOSE = 4'd5,
-		PROGRAM_TARGET_SXM_PERMUTE = 4'd6
+		PROGRAM_TARGET_MEM = 3'd0,
+		PROGRAM_TARGET_MXM_LOAD = 3'd1,
+		PROGRAM_TARGET_MXM_DEQUANT = 3'd2,
+		PROGRAM_TARGET_MXM_COMPUTE = 3'd3,
+		PROGRAM_TARGET_VXM = 3'd4,
+		PROGRAM_TARGET_SXM_TRANSPOSE = 3'd5,
+		PROGRAM_TARGET_SXM_PERMUTE = 3'd6,
+		PROGRAM_TARGET_RESERVED = 3'd7
 	} lpu_program_target_kind_e;
+
+	localparam integer PROGRAM_DESTINATION_HEMISPHERE_BIT = 11;
+	localparam integer PROGRAM_DESTINATION_KIND_MSB = 10;
+	localparam integer PROGRAM_DESTINATION_KIND_LSB = 8;
+	localparam integer PROGRAM_DESTINATION_INDEX_MSB = 7;
+	localparam integer PROGRAM_DESTINATION_INDEX_LSB = 0;
+
+	function automatic logic [PROGRAM_DESTINATION_WIDTH-1:0] program_destination_pack(
+		input logic hemisphere,
+		input logic [PROGRAM_TARGET_KIND_WIDTH-1:0] target_kind,
+		input logic [PROGRAM_TARGET_INDEX_WIDTH-1:0] target_index
+	);
+		program_destination_pack = {hemisphere, target_kind, target_index};
+	endfunction
 
 	// Program Load controls manage local iMEM state. They are not FU instruction opcodes.
 	typedef enum logic [PROGRAM_LOAD_CONTROL_WIDTH-1:0] {

@@ -11,9 +11,8 @@ module lpu_program_loader #(
 	input logic [2:0] command_write_opcode_i,
 	input logic [63:0] command_write_source_address_i,
 	input logic [31:0] command_write_byte_count_i,
-	input logic [1:0] command_write_hemisphere_i,
-	input logic [3:0] command_write_target_kind_i,
-	input logic [7:0] command_write_queue_id_i,
+	input logic [1:0] command_write_scope_i,
+	input logic [11:0] command_write_destination_i,
 	input logic [1:0] command_write_format_i,
 	input logic [16:0] command_write_imem_base_address_i,
 	input logic command_write_image_first_i,
@@ -29,9 +28,8 @@ module lpu_program_loader #(
 	input logic transaction_ready_i,
 	output logic [63:0] transaction_source_address_o,
 	output logic [31:0] transaction_byte_count_o,
-	output logic [1:0] transaction_hemisphere_o,
-	output logic [3:0] transaction_target_kind_o,
-	output logic [7:0] transaction_queue_id_o,
+	output logic [1:0] transaction_scope_o,
+	output logic [11:0] transaction_destination_o,
 	output logic [1:0] transaction_format_o,
 	output logic [16:0] transaction_imem_base_address_o,
 	output logic transaction_image_first_o,
@@ -41,9 +39,8 @@ module lpu_program_loader #(
 
 	output logic commit_valid_o,
 	input logic commit_ready_i,
-	output logic [1:0] commit_hemisphere_o,
-	output logic [3:0] commit_target_kind_o,
-	output logic [7:0] commit_queue_id_o,
+	output logic [1:0] commit_scope_o,
+	output logic [11:0] commit_destination_o,
 
 	input logic load_pipeline_idle_i,
 
@@ -64,9 +61,8 @@ module lpu_program_loader #(
 	logic [2:0] active_opcode_w;
 	logic [63:0] active_source_address_w;
 	logic [31:0] active_byte_count_w;
-	logic [1:0] active_hemisphere_w;
-	logic [3:0] active_target_kind_w;
-	logic [7:0] active_queue_id_w;
+	logic [1:0] active_scope_w;
+	logic [11:0] active_destination_w;
 	logic [1:0] active_format_w;
 	logic [16:0] active_imem_base_address_w;
 	logic active_image_first_w;
@@ -103,9 +99,8 @@ module lpu_program_loader #(
 		command_write_opcode_i,
 		command_write_source_address_i,
 		command_write_byte_count_i,
-		command_write_hemisphere_i,
-		command_write_target_kind_i,
-		command_write_queue_id_i,
+		command_write_scope_i,
+		command_write_destination_i,
 		command_write_format_i,
 		command_write_imem_base_address_i,
 		command_write_image_first_i,
@@ -118,9 +113,8 @@ module lpu_program_loader #(
 		active_opcode_w,
 		active_source_address_w,
 		active_byte_count_w,
-		active_hemisphere_w,
-		active_target_kind_w,
-		active_queue_id_w,
+		active_scope_w,
+		active_destination_w,
 		active_format_w,
 		active_imem_base_address_w,
 		active_image_first_w,
@@ -143,9 +137,8 @@ module lpu_program_loader #(
 	assign transaction_fire = transaction_valid_o && transaction_ready_i;
 	assign transaction_source_address_o = active_source_address_w;
 	assign transaction_byte_count_o = active_byte_count_w;
-	assign transaction_hemisphere_o = active_hemisphere_w;
-	assign transaction_target_kind_o = active_target_kind_w;
-	assign transaction_queue_id_o = active_queue_id_w;
+	assign transaction_scope_o = active_scope_w;
+	assign transaction_destination_o = active_destination_w;
 	assign transaction_format_o = active_format_w;
 	assign transaction_imem_base_address_o = active_imem_base_address_w;
 	assign transaction_image_first_o = active_image_first_w;
@@ -156,9 +149,8 @@ module lpu_program_loader #(
 	assign commit_valid_o = active_valid_q &&
 		(active_opcode_w == PROGRAM_LOADER_COMMIT_QUEUE) && !fault_q;
 	assign commit_fire = commit_valid_o && commit_ready_i;
-	assign commit_hemisphere_o = active_hemisphere_w;
-	assign commit_target_kind_o = active_target_kind_w;
-	assign commit_queue_id_o = active_queue_id_w;
+	assign commit_scope_o = active_scope_w;
+	assign commit_destination_o = active_destination_w;
 
 	assign jump_invalid_w = active_valid_q &&
 		(active_opcode_w == PROGRAM_LOADER_JUMP) &&

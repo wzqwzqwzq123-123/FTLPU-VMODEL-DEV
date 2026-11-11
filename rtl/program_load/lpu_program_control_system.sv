@@ -17,8 +17,7 @@ module lpu_program_control_system #(
 	input logic [2:0] command_write_opcode_i,
 	input logic [63:0] command_write_source_address_i,
 	input logic [31:0] command_write_byte_count_i,
-	input logic [3:0] command_write_target_kind_i,
-	input logic [7:0] command_write_global_queue_id_i,
+	input logic [11:0] command_write_destination_i,
 	input logic [1:0] command_write_format_i,
 	input logic [1:0] command_write_encoding_mode_i,
 	input logic [16:0] command_write_imem_base_address_i,
@@ -62,8 +61,7 @@ module lpu_program_control_system #(
 	output logic [5:0] endpoint_load_control_o,
 	output logic [255:0] endpoint_load_data_o,
 	output logic [7:0] endpoint_load_strb_o,
-	output logic [7:0] endpoint_load_target_kind_o,
-	output logic [15:0] endpoint_load_queue_id_o,
+	output logic [23:0] endpoint_load_destination_o,
 	output logic [33:0] endpoint_load_imem_address_o,
 	output logic [1:0] endpoint_load_last_o,
 	input logic [1:0] endpoint_commit_valid_i,
@@ -84,8 +82,10 @@ module lpu_program_control_system #(
 	localparam logic [1:0] PROGRAM_ENCODING_MACRO = 2'd0;
 	localparam logic [5:0] FRONTEND_FAULT_OFFSET = 6'd16;
 
-	logic [1:0] command_hemisphere_w;
-	logic [7:0] command_local_queue_w;
+	logic [1:0] command_scope_w;
+	logic [2:0] command_target_kind_w;
+	logic [7:0] command_target_index_w;
+	logic [7:0] command_global_target_w;
 	logic command_target_valid_w;
 	logic command_write_fire;
 	logic descriptor_invalid_w;
@@ -102,8 +102,7 @@ module lpu_program_control_system #(
 	logic [2:0] west_load_control;
 	logic [127:0] west_load_data;
 	logic [3:0] west_load_strb;
-	logic [3:0] west_load_target_kind;
-	logic [7:0] west_load_queue_id;
+	logic [11:0] west_load_destination;
 	logic [16:0] west_load_imem_address;
 	logic west_load_last;
 	logic east_load_valid;
@@ -111,8 +110,7 @@ module lpu_program_control_system #(
 	logic [2:0] east_load_control;
 	logic [127:0] east_load_data;
 	logic [3:0] east_load_strb;
-	logic [3:0] east_load_target_kind;
-	logic [7:0] east_load_queue_id;
+	logic [11:0] east_load_destination;
 	logic [16:0] east_load_imem_address;
 	logic east_load_last;
 
@@ -121,8 +119,7 @@ module lpu_program_control_system #(
 	logic [5:0] cluster_load_control;
 	logic [255:0] cluster_load_data;
 	logic [7:0] cluster_load_strb;
-	logic [7:0] cluster_load_target_kind;
-	logic [15:0] cluster_load_queue_id;
+	logic [23:0] cluster_load_destination;
 	logic [33:0] cluster_load_imem_address;
 	logic [1:0] cluster_load_last;
 	logic [1:0] cluster_commit_valid;
@@ -157,23 +154,24 @@ module lpu_program_control_system #(
 		end
 	end
 
-	// Translate CMODEL global Queue indices into the physical endpoint namespace.
-	// Hemisphere index 0 is East and index 1 is West throughout the load and execution paths.
+	// Destination already uses the physical endpoint namespace: 0 is East and 1 is West.
+	// The loader scope remains two bits only so the lower-level BOTH path can be preserved.
 	always_comb begin
-		command_hemisphere_w = PROGRAM_HEMISPHERE_EAST;
-		command_local_queue_w = command_write_global_queue_id_i;
+		command_scope_w = command_write_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] ?
+			PROGRAM_SCOPE_WEST : PROGRAM_SCOPE_EAST;
+		command_target_kind_w = command_write_destination_i[
+			PROGRAM_DESTINATION_KIND_MSB:PROGRAM_DESTINATION_KIND_LSB];
+		command_target_index_w = command_write_destination_i[
+			PROGRAM_DESTINATION_INDEX_MSB:PROGRAM_DESTINATION_INDEX_LSB];
+		command_global_target_w = command_target_index_w;
 		command_target_valid_w = 1'b0;
-		case(command_write_target_kind_i)
+		case(command_target_kind_w)
 			PROGRAM_TARGET_MEM: begin
-				if(command_write_global_queue_id_i < lpu_pkg::MEM_BANK_COUNT)begin
+				if(command_target_index_w < lpu_pkg::MEM_BANKS_PER_HEMISPHERE)begin
 					command_target_valid_w = 1'b1;
-					if(command_write_global_queue_id_i < lpu_pkg::MEM_BANKS_PER_HEMISPHERE)begin
-						command_hemisphere_w = PROGRAM_HEMISPHERE_EAST;
-						command_local_queue_w = command_write_global_queue_id_i;
-					end
-					else begin
-						command_hemisphere_w = PROGRAM_HEMISPHERE_WEST;
-						command_local_queue_w = command_write_global_queue_id_i -
+					if(command_write_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] ==
+						PROGRAM_HEMISPHERE_WEST)begin
+						command_global_target_w = command_target_index_w +
 							lpu_pkg::MEM_BANKS_PER_HEMISPHERE;
 					end
 				end
@@ -181,13 +179,11 @@ module lpu_program_control_system #(
 			PROGRAM_TARGET_MXM_LOAD,
 			PROGRAM_TARGET_MXM_DEQUANT,
 			PROGRAM_TARGET_MXM_COMPUTE: begin
-				if(command_write_global_queue_id_i < 8'd4)begin
+				if(command_target_index_w < 8'd2)begin
 					command_target_valid_w = 1'b1;
-					command_hemisphere_w = command_write_global_queue_id_i < 8'd2 ?
-						PROGRAM_HEMISPHERE_EAST : PROGRAM_HEMISPHERE_WEST;
-					command_local_queue_w = command_write_global_queue_id_i[1:0];
-					if(command_write_global_queue_id_i >= 8'd2)begin
-						command_local_queue_w = command_write_global_queue_id_i - 8'd2;
+					if(command_write_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] ==
+						PROGRAM_HEMISPHERE_WEST)begin
+						command_global_target_w = command_target_index_w + 8'd2;
 					end
 				end
 			end
@@ -202,14 +198,14 @@ module lpu_program_control_system #(
 		(command_write_opcode_i == PROGRAM_LOADER_LOAD_IMEM) &&
 		(!command_target_valid_w || (command_write_encoding_mode_i != PROGRAM_ENCODING_MACRO) ||
 		 (command_write_byte_count_i == 0) ||
-		 ((command_write_target_kind_i == PROGRAM_TARGET_MEM) &&
+		 ((command_target_kind_w == PROGRAM_TARGET_MEM) &&
 		  ((command_write_format_i != PROGRAM_FORMAT_96) ||
 		   ((command_write_byte_count_i % 12) != 0) ||
 		   (command_write_expected_word_count_i != command_write_byte_count_i / 12) ||
 		   ({1'b0, command_write_imem_base_address_i} + command_write_expected_word_count_i > MEM_IMEM_DEPTH))) ||
-		 (((command_write_target_kind_i == PROGRAM_TARGET_MXM_LOAD) ||
-		   (command_write_target_kind_i == PROGRAM_TARGET_MXM_DEQUANT) ||
-		   (command_write_target_kind_i == PROGRAM_TARGET_MXM_COMPUTE)) &&
+		 (((command_target_kind_w == PROGRAM_TARGET_MXM_LOAD) ||
+		   (command_target_kind_w == PROGRAM_TARGET_MXM_DEQUANT) ||
+		   (command_target_kind_w == PROGRAM_TARGET_MXM_COMPUTE)) &&
 		  ((command_write_format_i != PROGRAM_FORMAT_128) ||
 		   ((command_write_byte_count_i % 16) != 0) ||
 		   (command_write_expected_word_count_i != command_write_byte_count_i / 16) ||
@@ -218,11 +214,11 @@ module lpu_program_control_system #(
 	always_comb begin
 		descriptor_duplicate_w = 1'b0;
 		if(command_write_fire && (command_write_opcode_i == PROGRAM_LOADER_LOAD_IMEM) && command_target_valid_w)begin
-			case(command_write_target_kind_i)
-				PROGRAM_TARGET_MEM: descriptor_duplicate_w = mem_target_seen_q[command_write_global_queue_id_i];
-				PROGRAM_TARGET_MXM_LOAD: descriptor_duplicate_w = mxm_load_target_seen_q[command_write_global_queue_id_i[1:0]];
-				PROGRAM_TARGET_MXM_DEQUANT: descriptor_duplicate_w = mxm_dequant_target_seen_q[command_write_global_queue_id_i[1:0]];
-				PROGRAM_TARGET_MXM_COMPUTE: descriptor_duplicate_w = mxm_compute_target_seen_q[command_write_global_queue_id_i[1:0]];
+			case(command_target_kind_w)
+				PROGRAM_TARGET_MEM: descriptor_duplicate_w = mem_target_seen_q[command_global_target_w];
+				PROGRAM_TARGET_MXM_LOAD: descriptor_duplicate_w = mxm_load_target_seen_q[command_global_target_w[1:0]];
+				PROGRAM_TARGET_MXM_DEQUANT: descriptor_duplicate_w = mxm_dequant_target_seen_q[command_global_target_w[1:0]];
+				PROGRAM_TARGET_MXM_COMPUTE: descriptor_duplicate_w = mxm_compute_target_seen_q[command_global_target_w[1:0]];
 				default: descriptor_duplicate_w = 1'b0;
 			endcase
 		end
@@ -233,8 +229,7 @@ module lpu_program_control_system #(
 	assign cluster_load_control = {west_load_control, east_load_control};
 	assign cluster_load_data = {west_load_data, east_load_data};
 	assign cluster_load_strb = {west_load_strb, east_load_strb};
-	assign cluster_load_target_kind = {west_load_target_kind, east_load_target_kind};
-	assign cluster_load_queue_id = {west_load_queue_id, east_load_queue_id};
+	assign cluster_load_destination = {west_load_destination, east_load_destination};
 	assign cluster_load_imem_address = {west_load_imem_address, east_load_imem_address};
 	assign cluster_load_last = {west_load_last, east_load_last};
 	assign cluster_commit_ready = {west_commit_ready, east_commit_ready};
@@ -243,8 +238,7 @@ module lpu_program_control_system #(
 	assign endpoint_load_control_o = cluster_load_control;
 	assign endpoint_load_data_o = cluster_load_data;
 	assign endpoint_load_strb_o = cluster_load_strb;
-	assign endpoint_load_target_kind_o = cluster_load_target_kind;
-	assign endpoint_load_queue_id_o = cluster_load_queue_id;
+	assign endpoint_load_destination_o = cluster_load_destination;
 	assign endpoint_load_imem_address_o = cluster_load_imem_address;
 	assign endpoint_load_last_o = cluster_load_last;
 	assign cluster_commit_valid = endpoint_commit_valid_i;
@@ -285,9 +279,8 @@ module lpu_program_control_system #(
 		.command_write_opcode_i,
 		.command_write_source_address_i,
 		.command_write_byte_count_i,
-		.command_write_hemisphere_i(command_hemisphere_w),
-		.command_write_target_kind_i,
-		.command_write_queue_id_i(command_local_queue_w),
+		.command_write_scope_i(command_scope_w),
+		.command_write_destination_i,
 		.command_write_format_i,
 		.command_write_imem_base_address_i,
 		.command_write_image_first_i,
@@ -314,8 +307,7 @@ module lpu_program_control_system #(
 		.west_load_control_o(west_load_control),
 		.west_load_data_o(west_load_data),
 		.west_load_strb_o(west_load_strb),
-		.west_load_target_kind_o(west_load_target_kind),
-		.west_load_queue_id_o(west_load_queue_id),
+		.west_load_destination_o(west_load_destination),
 		.west_load_imem_address_o(west_load_imem_address),
 		.west_load_last_o(west_load_last),
 		.east_load_valid_o(east_load_valid),
@@ -323,8 +315,7 @@ module lpu_program_control_system #(
 		.east_load_control_o(east_load_control),
 		.east_load_data_o(east_load_data),
 		.east_load_strb_o(east_load_strb),
-		.east_load_target_kind_o(east_load_target_kind),
-		.east_load_queue_id_o(east_load_queue_id),
+		.east_load_destination_o(east_load_destination),
 		.east_load_imem_address_o(east_load_imem_address),
 		.east_load_last_o(east_load_last),
 		.west_commit_valid_i(cluster_commit_valid[1]),
@@ -393,11 +384,11 @@ module lpu_program_control_system #(
 			end
 			if(command_write_fire && (command_write_opcode_i == PROGRAM_LOADER_LOAD_IMEM) &&
 				command_target_valid_w && !descriptor_invalid_w && !descriptor_duplicate_w)begin
-				case(command_write_target_kind_i)
-					PROGRAM_TARGET_MEM: mem_target_seen_q[command_write_global_queue_id_i] <= 1'b1;
-					PROGRAM_TARGET_MXM_LOAD: mxm_load_target_seen_q[command_write_global_queue_id_i[1:0]] <= 1'b1;
-					PROGRAM_TARGET_MXM_DEQUANT: mxm_dequant_target_seen_q[command_write_global_queue_id_i[1:0]] <= 1'b1;
-					PROGRAM_TARGET_MXM_COMPUTE: mxm_compute_target_seen_q[command_write_global_queue_id_i[1:0]] <= 1'b1;
+				case(command_target_kind_w)
+					PROGRAM_TARGET_MEM: mem_target_seen_q[command_global_target_w] <= 1'b1;
+					PROGRAM_TARGET_MXM_LOAD: mxm_load_target_seen_q[command_global_target_w[1:0]] <= 1'b1;
+					PROGRAM_TARGET_MXM_DEQUANT: mxm_dequant_target_seen_q[command_global_target_w[1:0]] <= 1'b1;
+					PROGRAM_TARGET_MXM_COMPUTE: mxm_compute_target_seen_q[command_global_target_w[1:0]] <= 1'b1;
 					default: mem_target_seen_q <= mem_target_seen_q;
 				endcase
 			end

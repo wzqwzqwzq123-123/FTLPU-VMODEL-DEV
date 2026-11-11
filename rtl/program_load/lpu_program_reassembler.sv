@@ -9,9 +9,8 @@ module lpu_program_reassembler #(
 	input logic config_valid_i,
 	output logic config_ready_o,
 	input logic [31:0] config_byte_count_i,
-	input logic [1:0] config_hemisphere_i,
-	input logic [3:0] config_target_kind_i,
-	input logic [7:0] config_queue_id_i,
+	input logic [1:0] config_scope_i,
+	input logic [11:0] config_destination_i,
 	input logic [1:0] config_format_i,
 	input logic [16:0] config_imem_base_address_i,
 	input logic config_image_first_i,
@@ -31,9 +30,8 @@ module lpu_program_reassembler #(
 	input logic word_ready_i,
 	output logic [127:0] word_data_o,
 	output logic [3:0] word_strb_o,
-	output logic [1:0] word_hemisphere_o,
-	output logic [3:0] word_target_kind_o,
-	output logic [7:0] word_queue_id_o,
+	output logic [1:0] word_scope_o,
+	output logic [11:0] word_destination_o,
 	output logic [16:0] word_imem_address_o,
 	output logic word_image_last_o,
 
@@ -59,9 +57,8 @@ module lpu_program_reassembler #(
 	// Image context remains live across transaction boundaries so partial words survive burst changes.
 	logic image_active_q;
 	logic config_seen_q;
-	logic [1:0] image_hemisphere_q;
-	logic [3:0] image_target_kind_q;
-	logic [7:0] image_queue_id_q;
+	logic [1:0] image_scope_q;
+	logic [11:0] image_destination_q;
 	logic [1:0] image_format_q;
 	logic [16:0] image_imem_base_address_q;
 	logic [15:0] image_expected_word_count_q;
@@ -143,9 +140,8 @@ module lpu_program_reassembler #(
 
 	assign word_data_o = buffer_q[127:0];
 	assign word_strb_o = image_format_q == PROGRAM_FORMAT_96 ? 4'b0111 : 4'b1111;
-	assign word_hemisphere_o = image_hemisphere_q;
-	assign word_target_kind_o = image_target_kind_q;
-	assign word_queue_id_o = image_queue_id_q;
+	assign word_scope_o = image_scope_q;
+	assign word_destination_o = image_destination_q;
 	assign word_imem_address_o = image_imem_base_address_q + generated_word_count_q;
 	assign word_image_last_o = final_word_w;
 
@@ -176,16 +172,21 @@ module lpu_program_reassembler #(
 	assign config_invalid_w = config_start_w && (
 		(config_byte_count_i == '0) ||
 		((config_format_i != PROGRAM_FORMAT_96) && (config_format_i != PROGRAM_FORMAT_128)) ||
-		((config_hemisphere_i != PROGRAM_HEMISPHERE_EAST) &&
-		 (config_hemisphere_i != PROGRAM_HEMISPHERE_WEST)) ||
-		(config_target_kind_i > PROGRAM_TARGET_SXM_PERMUTE) ||
+		((config_scope_i != PROGRAM_SCOPE_EAST) &&
+		 (config_scope_i != PROGRAM_SCOPE_WEST) &&
+		 (config_scope_i != PROGRAM_SCOPE_BOTH)) ||
+		((config_scope_i == PROGRAM_SCOPE_EAST) &&
+		 (config_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] != PROGRAM_HEMISPHERE_EAST)) ||
+		((config_scope_i == PROGRAM_SCOPE_WEST) &&
+		 (config_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] != PROGRAM_HEMISPHERE_WEST)) ||
+		(config_destination_i[PROGRAM_DESTINATION_KIND_MSB:PROGRAM_DESTINATION_KIND_LSB] >
+		 PROGRAM_TARGET_SXM_PERMUTE) ||
 		(config_expected_word_count_i == '0) ||
 		({1'b0, config_imem_base_address_i} + config_expected_word_count_i > IMEM_DEPTH) ||
 		(config_image_first_i && (image_active_q || (buffer_count_q != '0))) ||
 		(!config_image_first_i && (!image_active_q ||
-			(config_hemisphere_i != image_hemisphere_q) ||
-			(config_target_kind_i != image_target_kind_q) ||
-			(config_queue_id_i != image_queue_id_q) ||
+			(config_scope_i != image_scope_q) ||
+			(config_destination_i != image_destination_q) ||
 			(config_format_i != image_format_q) ||
 			(config_imem_base_address_i != image_imem_base_address_q) ||
 			(config_expected_word_count_i != image_expected_word_count_q))));
@@ -260,9 +261,8 @@ module lpu_program_reassembler #(
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			image_active_q <= 1'b0;
-			image_hemisphere_q <= '0;
-			image_target_kind_q <= '0;
-			image_queue_id_q <= '0;
+			image_scope_q <= '0;
+			image_destination_q <= '0;
 			image_format_q <= '0;
 			image_imem_base_address_q <= '0;
 			image_expected_word_count_q <= '0;
@@ -273,9 +273,8 @@ module lpu_program_reassembler #(
 		else if(!fault_o)begin
 			if(config_start_w && !config_invalid_w && config_image_first_i)begin
 				image_active_q <= 1'b1;
-				image_hemisphere_q <= config_hemisphere_i;
-				image_target_kind_q <= config_target_kind_i;
-				image_queue_id_q <= config_queue_id_i;
+				image_scope_q <= config_scope_i;
+				image_destination_q <= config_destination_i;
 				image_format_q <= config_format_i;
 				image_imem_base_address_q <= config_imem_base_address_i;
 				image_expected_word_count_q <= config_expected_word_count_i;

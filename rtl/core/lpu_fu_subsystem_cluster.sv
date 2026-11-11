@@ -24,8 +24,7 @@ module lpu_fu_subsystem_cluster #(
 	input logic [5:0] endpoint_load_control_i,
 	input logic [255:0] endpoint_load_data_i,
 	input logic [7:0] endpoint_load_strb_i,
-	input logic [7:0] endpoint_load_target_kind_i,
-	input logic [15:0] endpoint_load_queue_id_i,
+	input logic [23:0] endpoint_load_destination_i,
 	input logic [33:0] endpoint_load_imem_address_i,
 	input logic [1:0] endpoint_load_last_i,
 	output logic [1:0] endpoint_commit_valid_o,
@@ -133,6 +132,9 @@ module lpu_fu_subsystem_cluster #(
 	logic route_fault_q;
 	logic [1:0] selected_ready_w;
 	logic [1:0] selected_valid_w;
+	logic [1:0] destination_hemisphere_match_w;
+	logic [5:0] destination_target_kind_w;
+	logic [15:0] destination_target_index_w;
 	logic [1:0] write_fire_w;
 	logic [1:0] write_error_w;
 	logic [1:0] route_error_fire_w;
@@ -250,6 +252,23 @@ module lpu_fu_subsystem_cluster #(
 		end
 	endgenerate
 
+	generate
+		for(genvar destination_gen = 0; destination_gen < 2; destination_gen = destination_gen + 1)begin : gen_destination_fields
+			assign destination_hemisphere_match_w[destination_gen] =
+				endpoint_load_destination_i[destination_gen*PROGRAM_DESTINATION_WIDTH+
+					PROGRAM_DESTINATION_HEMISPHERE_BIT] ==
+					(destination_gen == 0 ? PROGRAM_HEMISPHERE_EAST : PROGRAM_HEMISPHERE_WEST);
+			assign destination_target_kind_w[destination_gen*PROGRAM_TARGET_KIND_WIDTH+:
+				PROGRAM_TARGET_KIND_WIDTH] = endpoint_load_destination_i[
+				destination_gen*PROGRAM_DESTINATION_WIDTH+PROGRAM_DESTINATION_KIND_LSB+:
+				PROGRAM_TARGET_KIND_WIDTH];
+			assign destination_target_index_w[destination_gen*PROGRAM_TARGET_INDEX_WIDTH+:
+				PROGRAM_TARGET_INDEX_WIDTH] = endpoint_load_destination_i[
+				destination_gen*PROGRAM_DESTINATION_WIDTH+PROGRAM_DESTINATION_INDEX_LSB+:
+				PROGRAM_TARGET_INDEX_WIDTH];
+		end
+	endgenerate
+
 	// The cluster only routes Program Load traffic; all instruction state lives inside FU subsystems.
 	always_comb begin
 		endpoint_load_ready_o = '0;
@@ -263,20 +282,26 @@ module lpu_fu_subsystem_cluster #(
 
 		for(integer hemisphere = 0; hemisphere < 2; hemisphere = hemisphere + 1)begin
 			selected_ready_w[hemisphere] = 1'b1;
-			case(endpoint_load_target_kind_i[hemisphere*4+:4])
+			case(destination_target_kind_w[hemisphere*PROGRAM_TARGET_KIND_WIDTH+:
+				PROGRAM_TARGET_KIND_WIDTH])
 				PROGRAM_TARGET_MEM: begin
 					selected_valid_w[hemisphere] =
-						endpoint_load_queue_id_i[hemisphere*8+:8] < lpu_pkg::MEM_BANKS_PER_HEMISPHERE;
+						destination_hemisphere_match_w[hemisphere] &&
+						(destination_target_index_w[hemisphere*PROGRAM_TARGET_INDEX_WIDTH+:
+						 PROGRAM_TARGET_INDEX_WIDTH] < lpu_pkg::MEM_BANKS_PER_HEMISPHERE);
 					selected_ready_w[hemisphere] = selected_valid_w[hemisphere] ?
 						mem_program_ready[hemisphere] : 1'b1;
 				end
 				PROGRAM_TARGET_MXM_LOAD,
 				PROGRAM_TARGET_MXM_DEQUANT,
 				PROGRAM_TARGET_MXM_COMPUTE: begin
-					if(endpoint_load_queue_id_i[hemisphere*8+:8] < 2)begin
+					if(destination_hemisphere_match_w[hemisphere] &&
+						destination_target_index_w[hemisphere*PROGRAM_TARGET_INDEX_WIDTH+:
+							PROGRAM_TARGET_INDEX_WIDTH] < 2)begin
 						selected_valid_w[hemisphere] = 1'b1;
 						selected_ready_w[hemisphere] = mxm_program_ready[
-							hemisphere*2 + endpoint_load_queue_id_i[hemisphere*8+:8]];
+							hemisphere*2 + destination_target_index_w[
+							hemisphere*PROGRAM_TARGET_INDEX_WIDTH+:PROGRAM_TARGET_INDEX_WIDTH]];
 					end
 				end
 				default: selected_valid_w[hemisphere] = 1'b0;
@@ -284,7 +309,7 @@ module lpu_fu_subsystem_cluster #(
 
 			if((endpoint_load_control_i[hemisphere*3+:3] == PROGRAM_LOAD_CLEAR) ||
 				(endpoint_load_control_i[hemisphere*3+:3] == PROGRAM_LOAD_ABORT))begin
-				selected_valid_w[hemisphere] = 1'b1;
+				selected_valid_w[hemisphere] = destination_hemisphere_match_w[hemisphere];
 				selected_ready_w[hemisphere] = 1'b1;
 			end
 
@@ -297,28 +322,40 @@ module lpu_fu_subsystem_cluster #(
 
 			mem_program_valid[hemisphere] = endpoint_load_valid_i[hemisphere] &&
 				endpoint_load_ready_o[hemisphere] &&
-				(((endpoint_load_target_kind_i[hemisphere*4+:4] == PROGRAM_TARGET_MEM) &&
+				(((destination_target_kind_w[hemisphere*PROGRAM_TARGET_KIND_WIDTH+:
+				   PROGRAM_TARGET_KIND_WIDTH] == PROGRAM_TARGET_MEM) &&
 				  selected_valid_w[hemisphere]) ||
-				 (endpoint_load_control_i[hemisphere*3+:3] == PROGRAM_LOAD_CLEAR) ||
-				 (endpoint_load_control_i[hemisphere*3+:3] == PROGRAM_LOAD_ABORT));
+				 ((endpoint_load_control_i[hemisphere*3+:3] == PROGRAM_LOAD_CLEAR) &&
+				  destination_hemisphere_match_w[hemisphere]) ||
+				 ((endpoint_load_control_i[hemisphere*3+:3] == PROGRAM_LOAD_ABORT) &&
+				  destination_hemisphere_match_w[hemisphere]));
 
 			for(integer local_mxm = 0; local_mxm < 2; local_mxm = local_mxm + 1)begin
 				mxm_program_valid[hemisphere*2+local_mxm] = endpoint_load_valid_i[hemisphere] &&
 					endpoint_load_ready_o[hemisphere] &&
-					(((endpoint_load_target_kind_i[hemisphere*4+:4] >= PROGRAM_TARGET_MXM_LOAD) &&
-					  (endpoint_load_target_kind_i[hemisphere*4+:4] <= PROGRAM_TARGET_MXM_COMPUTE) &&
-					  (endpoint_load_queue_id_i[hemisphere*8+:8] == local_mxm)) ||
-					 (endpoint_load_control_i[hemisphere*3+:3] == PROGRAM_LOAD_CLEAR) ||
-					 (endpoint_load_control_i[hemisphere*3+:3] == PROGRAM_LOAD_ABORT));
+					(((destination_target_kind_w[hemisphere*PROGRAM_TARGET_KIND_WIDTH+:
+					   PROGRAM_TARGET_KIND_WIDTH] >= PROGRAM_TARGET_MXM_LOAD) &&
+					  (destination_target_kind_w[hemisphere*PROGRAM_TARGET_KIND_WIDTH+:
+					   PROGRAM_TARGET_KIND_WIDTH] <= PROGRAM_TARGET_MXM_COMPUTE) &&
+					  (destination_target_index_w[hemisphere*PROGRAM_TARGET_INDEX_WIDTH+:
+					   PROGRAM_TARGET_INDEX_WIDTH] == local_mxm) &&
+					  destination_hemisphere_match_w[hemisphere]) ||
+					 ((endpoint_load_control_i[hemisphere*3+:3] == PROGRAM_LOAD_CLEAR) &&
+					  destination_hemisphere_match_w[hemisphere]) ||
+					 ((endpoint_load_control_i[hemisphere*3+:3] == PROGRAM_LOAD_ABORT) &&
+					  destination_hemisphere_match_w[hemisphere]));
 			end
 
 			write_error_w[hemisphere] = write_fire_w[hemisphere] &&
 				(!selected_valid_w[hemisphere] ||
-				 ((endpoint_load_target_kind_i[hemisphere*4+:4] == PROGRAM_TARGET_MEM) &&
+				 ((destination_target_kind_w[hemisphere*PROGRAM_TARGET_KIND_WIDTH+:
+				   PROGRAM_TARGET_KIND_WIDTH] == PROGRAM_TARGET_MEM) &&
 				  ((endpoint_load_strb_i[hemisphere*4+:4] != 4'b0111) ||
 				   (endpoint_load_imem_address_i[hemisphere*17+:17] >= MEM_IMEM_DEPTH))) ||
-				 (((endpoint_load_target_kind_i[hemisphere*4+:4] >= PROGRAM_TARGET_MXM_LOAD) &&
-				   (endpoint_load_target_kind_i[hemisphere*4+:4] <= PROGRAM_TARGET_MXM_COMPUTE)) &&
+				 (((destination_target_kind_w[hemisphere*PROGRAM_TARGET_KIND_WIDTH+:
+				    PROGRAM_TARGET_KIND_WIDTH] >= PROGRAM_TARGET_MXM_LOAD) &&
+				   (destination_target_kind_w[hemisphere*PROGRAM_TARGET_KIND_WIDTH+:
+				    PROGRAM_TARGET_KIND_WIDTH] <= PROGRAM_TARGET_MXM_COMPUTE)) &&
 				  ((endpoint_load_strb_i[hemisphere*4+:4] != 4'b1111) ||
 				   (endpoint_load_imem_address_i[hemisphere*17+:17] >= MXM_IMEM_DEPTH))));
 			route_error_fire_w[hemisphere] = endpoint_load_valid_i[hemisphere] &&
@@ -436,7 +473,8 @@ module lpu_fu_subsystem_cluster #(
 				.program_valid_i(mem_program_valid[HEMISPHERE_INDEX]),
 				.program_ready_o(mem_program_ready[HEMISPHERE_INDEX]),
 				.program_control_i(endpoint_load_control_i[HEMISPHERE_INDEX*3+:3]),
-				.program_queue_id_i(endpoint_load_queue_id_i[HEMISPHERE_INDEX*8+:8]),
+				.program_queue_id_i(destination_target_index_w[
+					HEMISPHERE_INDEX*PROGRAM_TARGET_INDEX_WIDTH+:PROGRAM_TARGET_INDEX_WIDTH]),
 				.program_address_i(endpoint_load_imem_address_i[HEMISPHERE_INDEX*17+:17]),
 				.program_data_i(endpoint_load_data_i[HEMISPHERE_INDEX*128+:128]),
 				.program_strb_i(endpoint_load_strb_i[HEMISPHERE_INDEX*4+:4]),
@@ -509,7 +547,8 @@ module lpu_fu_subsystem_cluster #(
 					.program_valid_i(mxm_program_valid[MXM_INDEX]),
 					.program_ready_o(mxm_program_ready[MXM_INDEX]),
 					.program_control_i(endpoint_load_control_i[HEMISPHERE_INDEX*3+:3]),
-					.program_target_kind_i(endpoint_load_target_kind_i[HEMISPHERE_INDEX*4+:4]),
+					.program_target_kind_i({1'b0, destination_target_kind_w[
+						HEMISPHERE_INDEX*PROGRAM_TARGET_KIND_WIDTH+:PROGRAM_TARGET_KIND_WIDTH]}),
 					.program_address_i(endpoint_load_imem_address_i[HEMISPHERE_INDEX*17+:17]),
 					.program_data_i(endpoint_load_data_i[HEMISPHERE_INDEX*128+:128]),
 					.program_strb_i(endpoint_load_strb_i[HEMISPHERE_INDEX*4+:4]),
