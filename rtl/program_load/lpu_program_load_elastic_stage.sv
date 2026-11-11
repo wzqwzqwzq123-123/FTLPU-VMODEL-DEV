@@ -6,7 +6,7 @@ module lpu_program_load_elastic_stage #(
 
 	input logic input_valid_i,
 	output logic input_ready_o,
-	input logic [2:0] input_control_i,
+	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] input_control_i,
 	input logic [127:0] input_data_i,
 	input logic [3:0] input_strb_i,
 	input logic [1:0] input_scope_i,
@@ -16,7 +16,7 @@ module lpu_program_load_elastic_stage #(
 
 	output logic output_valid_o,
 	input logic output_ready_i,
-	output logic [2:0] output_control_o,
+	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] output_control_o,
 	output logic [127:0] output_data_o,
 	output logic [3:0] output_strb_o,
 	output logic [1:0] output_scope_o,
@@ -27,7 +27,7 @@ module lpu_program_load_elastic_stage #(
 	output logic [$clog2(DEPTH+1)-1:0] level_o,
 	output logic idle_o
 );
-	localparam integer RECORD_WIDTH = 167;
+	localparam integer RECORD_WIDTH = lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH + 164;
 
 	logic [RECORD_WIDTH-1:0] input_record;
 	logic [RECORD_WIDTH-1:0] output_record;

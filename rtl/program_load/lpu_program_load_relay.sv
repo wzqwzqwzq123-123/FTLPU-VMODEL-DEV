@@ -22,7 +22,7 @@ module lpu_program_load_relay #(
 
 	input logic input_valid_i,
 	output logic input_ready_o,
-	input logic [2:0] input_control_i,
+	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] input_control_i,
 	input logic [127:0] input_data_i,
 	input logic [3:0] input_strb_i,
 	input logic [1:0] input_scope_i,
@@ -32,7 +32,7 @@ module lpu_program_load_relay #(
 
 	output logic [LOCAL_BANK_COUNT-1:0] local_valid_o,
 	input logic [LOCAL_BANK_COUNT-1:0] local_ready_i,
-	output logic [2:0] local_control_o,
+	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] local_control_o,
 	output logic [127:0] local_data_o,
 	output logic [3:0] local_strb_o,
 	output logic [1:0] local_scope_o,
@@ -42,7 +42,7 @@ module lpu_program_load_relay #(
 
 	output logic forward_valid_o,
 	input logic forward_ready_i,
-	output logic [2:0] forward_control_o,
+	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] forward_control_o,
 	output logic [127:0] forward_data_o,
 	output logic [3:0] forward_strb_o,
 	output logic [1:0] forward_scope_o,
@@ -57,7 +57,7 @@ module lpu_program_load_relay #(
 );
 	import lpu_program_load_pkg::*;
 
-	localparam integer RECORD_WIDTH = 167;
+	localparam integer RECORD_WIDTH = PROGRAM_LOAD_CONTROL_WIDTH + 164;
 	localparam integer PTR_WIDTH = (BUFFER_DEPTH <= 1) ? 1 : $clog2(BUFFER_DEPTH);
 	localparam integer LEVEL_WIDTH = $clog2(BUFFER_DEPTH + 1);
 	localparam integer MEM_BANK_COUNT = MEM_SLICES_PER_HEMISPHERE * BANKS_PER_SLICE;
@@ -73,7 +73,7 @@ module lpu_program_load_relay #(
 	logic [RECORD_WIDTH-1:0] head_record_w;
 
 	logic head_valid_w;
-	logic [2:0] head_control_w;
+	logic [PROGRAM_LOAD_CONTROL_WIDTH-1:0] head_control_w;
 	logic [127:0] head_data_w;
 	logic [3:0] head_strb_w;
 	logic [1:0] head_scope_w;

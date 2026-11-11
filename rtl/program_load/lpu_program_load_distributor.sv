@@ -6,7 +6,7 @@ module lpu_program_load_distributor #(
 
 	input logic input_valid_i,
 	output logic input_ready_o,
-	input logic [2:0] input_control_i,
+	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] input_control_i,
 	input logic [127:0] input_data_i,
 	input logic [3:0] input_strb_i,
 	input logic [1:0] input_scope_i,
@@ -16,7 +16,7 @@ module lpu_program_load_distributor #(
 
 	output logic west_valid_o,
 	input logic west_ready_i,
-	output logic [2:0] west_control_o,
+	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] west_control_o,
 	output logic [127:0] west_data_o,
 	output logic [3:0] west_strb_o,
 	output logic [11:0] west_destination_o,
@@ -25,7 +25,7 @@ module lpu_program_load_distributor #(
 
 	output logic east_valid_o,
 	input logic east_ready_i,
-	output logic [2:0] east_control_o,
+	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] east_control_o,
 	output logic [127:0] east_data_o,
 	output logic [3:0] east_strb_o,
 	output logic [11:0] east_destination_o,
@@ -40,7 +40,7 @@ module lpu_program_load_distributor #(
 
 	logic head_valid;
 	logic head_ready;
-	logic [2:0] head_control;
+	logic [PROGRAM_LOAD_CONTROL_WIDTH-1:0] head_control;
 	logic [127:0] head_data;
 	logic [3:0] head_strb;
 	logic [1:0] head_scope;

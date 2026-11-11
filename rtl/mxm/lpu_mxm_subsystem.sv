@@ -1,4 +1,5 @@
 module lpu_mxm_subsystem #(
+	parameter integer HEMISPHERE_INDEX = lpu_program_load_pkg::PROGRAM_HEMISPHERE_EAST,
 	parameter integer LOCAL_MXM_INDEX = 0,
 	parameter integer IMEM_DEPTH = 65536,
 	parameter integer ACTIVE_CONTEXTS = 4,
@@ -18,8 +19,8 @@ module lpu_mxm_subsystem #(
 
 	input logic program_valid_i,
 	output logic program_ready_o,
-	input logic [2:0] program_control_i,
-	input logic [3:0] program_target_kind_i,
+	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] program_control_i,
+	input logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0] program_destination_i,
 	input logic [16:0] program_address_i,
 	input logic [127:0] program_data_i,
 	input logic [3:0] program_strb_i,
@@ -61,9 +62,11 @@ module lpu_mxm_subsystem #(
 );
 	import lpu_program_load_pkg::*;
 
-	logic clear_fire_w;
 	logic write_fire_w;
 	logic prime_fire_w;
+	logic destination_valid_w;
+	logic [2:0] program_target_kind_w;
+	logic [7:0] program_target_index_w;
 	logic load_load_ready;
 	logic load_prime_ready;
 	logic dequant_load_ready;
@@ -125,14 +128,21 @@ module lpu_mxm_subsystem #(
 	logic [2:0] frontend_run;
 	logic [3*32-1:0] frontend_schedule_cycle;
 
-	assign clear_fire_w = program_valid_i && program_ready_o &&
-		((program_control_i == PROGRAM_LOAD_CLEAR) || (program_control_i == PROGRAM_LOAD_ABORT));
+	assign program_target_kind_w = program_destination_i[
+		PROGRAM_DESTINATION_KIND_MSB:PROGRAM_DESTINATION_KIND_LSB];
+	assign program_target_index_w = program_destination_i[
+		PROGRAM_DESTINATION_INDEX_MSB:PROGRAM_DESTINATION_INDEX_LSB];
+	assign destination_valid_w =
+		(program_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] == HEMISPHERE_INDEX) &&
+		(program_target_index_w == LOCAL_MXM_INDEX) &&
+		(program_target_kind_w >= PROGRAM_TARGET_MXM_LOAD) &&
+		(program_target_kind_w <= PROGRAM_TARGET_MXM_COMPUTE);
 	assign write_fire_w = program_valid_i && program_ready_o &&
-		(program_control_i == PROGRAM_LOAD_WRITE) &&
+		(program_control_i == PROGRAM_LOAD_WRITE) && destination_valid_w &&
 		(program_strb_i == 4'b1111) && (program_address_i < IMEM_DEPTH);
 	assign prime_fire_w = program_valid_i && program_ready_o &&
-		(program_control_i == PROGRAM_LOAD_PRIME);
-	assign frontend_rst_ni = rst_ni && !program_reset_i && !clear_fire_w;
+		(program_control_i == PROGRAM_LOAD_PRIME) && destination_valid_w;
+	assign frontend_rst_ni = rst_ni && !program_reset_i;
 	// Stream order is Load, Dequant, Compute. Each stream may independently
 	// freeze its Queue-local time at a QCTL boundary.
 	generate
@@ -156,25 +166,22 @@ module lpu_mxm_subsystem #(
 
 	// Program writes target one of the three instruction streams owned by this MXM.
 	always_comb begin
-		case(program_target_kind_i)
+		case(program_target_kind_w)
 			PROGRAM_TARGET_MXM_LOAD: program_ready_o = program_control_i == PROGRAM_LOAD_PRIME ?
 				load_prime_ready : load_load_ready;
 			PROGRAM_TARGET_MXM_DEQUANT: program_ready_o = program_control_i == PROGRAM_LOAD_PRIME ?
 				dequant_prime_ready : dequant_load_ready;
 			PROGRAM_TARGET_MXM_COMPUTE: program_ready_o = program_control_i == PROGRAM_LOAD_PRIME ?
 				compute_prime_ready : compute_load_ready;
-			default: program_ready_o = (program_control_i == PROGRAM_LOAD_CLEAR) ||
-				(program_control_i == PROGRAM_LOAD_ABORT);
+			default: program_ready_o = 1'b1;
 		endcase
-		if((program_control_i == PROGRAM_LOAD_CLEAR) || (program_control_i == PROGRAM_LOAD_ABORT))begin
+		if(!destination_valid_w)begin
 			program_ready_o = 1'b1;
 		end
 		program_error_o = program_valid_i && program_ready_o &&
-			(((program_target_kind_i < PROGRAM_TARGET_MXM_LOAD) ||
-			  (program_target_kind_i > PROGRAM_TARGET_MXM_COMPUTE)) ||
+			(!destination_valid_w ||
 			 ((program_control_i == PROGRAM_LOAD_WRITE) &&
-			  ((program_strb_i != 4'b1111) || (program_address_i >= IMEM_DEPTH))) ||
-			 (program_control_i > PROGRAM_LOAD_ABORT));
+			  ((program_strb_i != 4'b1111) || (program_address_i >= IMEM_DEPTH))));
 	end
 
 	lpu_mxm_local_imem_frontend #(
@@ -182,11 +189,11 @@ module lpu_mxm_subsystem #(
 		.IMEM_DEPTH(IMEM_DEPTH),
 		.ACTIVE_CONTEXTS(ACTIVE_CONTEXTS)
 	) u_load_frontend (
-		.clk_i, .rst_ni, .program_reset_i, .clear_i(clear_fire_w),
-		.load_valid_i(write_fire_w && (program_target_kind_i == PROGRAM_TARGET_MXM_LOAD)),
+		.clk_i, .rst_ni, .program_reset_i, .clear_i(1'b0),
+		.load_valid_i(write_fire_w && (program_target_kind_w == PROGRAM_TARGET_MXM_LOAD)),
 		.load_ready_o(load_load_ready), .load_address_i(program_address_i),
 		.load_data_i(program_data_i), .load_strb_i(program_strb_i), .load_last_i(program_last_i),
-		.prime_valid_i(prime_fire_w && (program_target_kind_i == PROGRAM_TARGET_MXM_LOAD)),
+		.prime_valid_i(prime_fire_w && (program_target_kind_w == PROGRAM_TARGET_MXM_LOAD)),
 		.prime_ready_o(load_prime_ready), .run_i(frontend_run[0]),
 		.schedule_cycle_i(frontend_schedule_cycle[0*32+:32]), .issue_valid_o(load_frontend_valid), .issue_ready_i(load_frontend_ready),
 		.issue_instruction_o(load_frontend_instruction), .issue_cycle_o(load_frontend_cycle),
@@ -199,11 +206,11 @@ module lpu_mxm_subsystem #(
 		.IMEM_DEPTH(IMEM_DEPTH),
 		.ACTIVE_CONTEXTS(ACTIVE_CONTEXTS)
 	) u_dequant_frontend (
-		.clk_i, .rst_ni, .program_reset_i, .clear_i(clear_fire_w),
-		.load_valid_i(write_fire_w && (program_target_kind_i == PROGRAM_TARGET_MXM_DEQUANT)),
+		.clk_i, .rst_ni, .program_reset_i, .clear_i(1'b0),
+		.load_valid_i(write_fire_w && (program_target_kind_w == PROGRAM_TARGET_MXM_DEQUANT)),
 		.load_ready_o(dequant_load_ready), .load_address_i(program_address_i),
 		.load_data_i(program_data_i), .load_strb_i(program_strb_i), .load_last_i(program_last_i),
-		.prime_valid_i(prime_fire_w && (program_target_kind_i == PROGRAM_TARGET_MXM_DEQUANT)),
+		.prime_valid_i(prime_fire_w && (program_target_kind_w == PROGRAM_TARGET_MXM_DEQUANT)),
 		.prime_ready_o(dequant_prime_ready), .run_i(frontend_run[1]),
 		.schedule_cycle_i(frontend_schedule_cycle[1*32+:32]), .issue_valid_o(dequant_frontend_valid), .issue_ready_i(dequant_frontend_ready),
 		.issue_instruction_o(dequant_frontend_instruction), .issue_cycle_o(dequant_frontend_cycle),
@@ -216,11 +223,11 @@ module lpu_mxm_subsystem #(
 		.IMEM_DEPTH(IMEM_DEPTH),
 		.ACTIVE_CONTEXTS(ACTIVE_CONTEXTS)
 	) u_compute_frontend (
-		.clk_i, .rst_ni, .program_reset_i, .clear_i(clear_fire_w),
-		.load_valid_i(write_fire_w && (program_target_kind_i == PROGRAM_TARGET_MXM_COMPUTE)),
+		.clk_i, .rst_ni, .program_reset_i, .clear_i(1'b0),
+		.load_valid_i(write_fire_w && (program_target_kind_w == PROGRAM_TARGET_MXM_COMPUTE)),
 		.load_ready_o(compute_load_ready), .load_address_i(program_address_i),
 		.load_data_i(program_data_i), .load_strb_i(program_strb_i), .load_last_i(program_last_i),
-		.prime_valid_i(prime_fire_w && (program_target_kind_i == PROGRAM_TARGET_MXM_COMPUTE)),
+		.prime_valid_i(prime_fire_w && (program_target_kind_w == PROGRAM_TARGET_MXM_COMPUTE)),
 		.prime_ready_o(compute_prime_ready), .run_i(frontend_run[2]),
 		.schedule_cycle_i(frontend_schedule_cycle[2*32+:32]), .issue_valid_o(compute_frontend_valid), .issue_ready_i(compute_frontend_ready),
 		.issue_instruction_o(compute_frontend_instruction), .issue_cycle_o(compute_frontend_cycle),

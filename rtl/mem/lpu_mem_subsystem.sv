@@ -1,4 +1,5 @@
 module lpu_mem_subsystem #(
+	parameter integer HEMISPHERE_INDEX = lpu_program_load_pkg::PROGRAM_HEMISPHERE_EAST,
 	parameter integer IMEM_DEPTH = 131072,
 	parameter integer ACTIVE_CONTEXTS = 4,
 	parameter integer FU_QUEUE_DEPTH = 16,
@@ -19,8 +20,8 @@ module lpu_mem_subsystem #(
 
 	input logic program_valid_i,
 	output logic program_ready_o,
-	input logic [2:0] program_control_i,
-	input logic [7:0] program_queue_id_i,
+	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] program_control_i,
+	input logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0] program_destination_i,
 	input logic [16:0] program_address_i,
 	input logic [127:0] program_data_i,
 	input logic [3:0] program_strb_i,
@@ -54,9 +55,11 @@ module lpu_mem_subsystem #(
 	import lpu_program_load_pkg::*;
 	localparam integer QUEUE_COUNT = lpu_pkg::MEM_BANKS_PER_HEMISPHERE;
 
-	logic clear_fire_w;
 	logic write_fire_w;
 	logic prime_fire_w;
+	logic destination_valid_w;
+	logic [2:0] program_target_kind_w;
+	logic [7:0] program_queue_id_w;
 	logic selected_load_ready_w;
 	logic selected_prime_ready_w;
 	logic [QUEUE_COUNT-1:0] load_ready;
@@ -76,14 +79,20 @@ module lpu_mem_subsystem #(
 	logic [QUEUE_COUNT*lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] execution_issue_instruction;
 	logic frontend_rst_ni;
 
-	assign clear_fire_w = program_valid_i && program_ready_o &&
-		((program_control_i == PROGRAM_LOAD_CLEAR) || (program_control_i == PROGRAM_LOAD_ABORT));
+	assign program_target_kind_w = program_destination_i[
+		PROGRAM_DESTINATION_KIND_MSB:PROGRAM_DESTINATION_KIND_LSB];
+	assign program_queue_id_w = program_destination_i[
+		PROGRAM_DESTINATION_INDEX_MSB:PROGRAM_DESTINATION_INDEX_LSB];
+	assign destination_valid_w =
+		(program_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] == HEMISPHERE_INDEX) &&
+		(program_target_kind_w == PROGRAM_TARGET_MEM) && (program_queue_id_w < QUEUE_COUNT);
 	assign write_fire_w = program_valid_i && program_ready_o &&
-		(program_control_i == PROGRAM_LOAD_WRITE) && (program_strb_i == 4'b0111) &&
+		(program_control_i == PROGRAM_LOAD_WRITE) && destination_valid_w &&
+		(program_strb_i == 4'b0111) &&
 		(program_address_i < IMEM_DEPTH);
 	assign prime_fire_w = program_valid_i && program_ready_o &&
-		(program_control_i == PROGRAM_LOAD_PRIME);
-	assign frontend_rst_ni = rst_ni && !program_reset_i && !clear_fire_w;
+		(program_control_i == PROGRAM_LOAD_PRIME) && destination_valid_w;
+	assign frontend_rst_ni = rst_ni && !program_reset_i;
 	assign frontends_ready_o = &frontend_ready;
 	assign frontends_idle_o = (&frontend_idle) && (&timed_queue_idle);
 	assign frontend_fault_o = (|frontend_fault) || (|timed_queue_fault) || (|mem_fault_o);
@@ -94,13 +103,13 @@ module lpu_mem_subsystem #(
 		local_issue_instruction_o : external_issue_instruction_i;
 	assign external_issue_ready_o = local_frontend_enable_i ? '0 : execution_issue_ready;
 
-	// Queue ID is bank-local within one Hemisphere: slice*2+bank, 0..103.
+	// The 12-bit Destination stays intact at the FU boundary; MEM decodes its local Bank here.
 	always_comb begin
 		selected_load_ready_w = 1'b0;
 		selected_prime_ready_w = 1'b0;
-		if(program_queue_id_i < QUEUE_COUNT)begin
-			selected_load_ready_w = load_ready[program_queue_id_i];
-			selected_prime_ready_w = prime_ready[program_queue_id_i];
+		if(destination_valid_w)begin
+			selected_load_ready_w = load_ready[program_queue_id_w];
+			selected_prime_ready_w = prime_ready[program_queue_id_w];
 		end
 		else begin
 			// Invalid destinations are consumed and reported instead of holding
@@ -111,15 +120,11 @@ module lpu_mem_subsystem #(
 		case(program_control_i)
 			PROGRAM_LOAD_WRITE: program_ready_o = selected_load_ready_w;
 			PROGRAM_LOAD_PRIME: program_ready_o = selected_prime_ready_w;
-			PROGRAM_LOAD_CLEAR,
-			PROGRAM_LOAD_ABORT: program_ready_o = 1'b1;
-			default: program_ready_o = 1'b1;
 		endcase
 		program_error_o = program_valid_i && program_ready_o &&
-			((program_queue_id_i >= QUEUE_COUNT) ||
+			(!destination_valid_w ||
 			 ((program_control_i == PROGRAM_LOAD_WRITE) &&
-			  ((program_strb_i != 4'b0111) || (program_address_i >= IMEM_DEPTH))) ||
-			 (program_control_i > PROGRAM_LOAD_ABORT));
+			  ((program_strb_i != 4'b0111) || (program_address_i >= IMEM_DEPTH))));
 	end
 
 	generate
@@ -139,12 +144,12 @@ module lpu_mem_subsystem #(
 				.IMEM_DEPTH(IMEM_DEPTH),
 				.ACTIVE_CONTEXTS(ACTIVE_CONTEXTS)
 			) u_frontend (
-				.clk_i, .rst_ni, .program_reset_i, .clear_i(clear_fire_w),
-				.load_valid_i(write_fire_w && (program_queue_id_i == queue_gen)),
+				.clk_i, .rst_ni, .program_reset_i, .clear_i(1'b0),
+				.load_valid_i(write_fire_w && (program_queue_id_w == queue_gen)),
 				.load_ready_o(load_ready[queue_gen]), .load_address_i(program_address_i),
 				.load_data_i(program_data_i), .load_strb_i(program_strb_i),
 				.load_last_i(program_last_i),
-				.prime_valid_i(prime_fire_w && (program_queue_id_i == queue_gen)),
+				.prime_valid_i(prime_fire_w && (program_queue_id_w == queue_gen)),
 				.prime_ready_o(prime_ready[queue_gen]), .run_i(frontend_run),
 				.schedule_cycle_i(frontend_schedule_cycle),
 				.issue_valid_o(frontend_issue_valid[queue_gen]),

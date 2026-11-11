@@ -50,7 +50,7 @@ module lpu_program_load_subsystem #(
 
 	output logic west_load_valid_o,
 	input logic west_load_ready_i,
-	output logic [2:0] west_load_control_o,
+	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] west_load_control_o,
 	output logic [127:0] west_load_data_o,
 	output logic [3:0] west_load_strb_o,
 	output logic [11:0] west_load_destination_o,
@@ -59,7 +59,7 @@ module lpu_program_load_subsystem #(
 
 	output logic east_load_valid_o,
 	input logic east_load_ready_i,
-	output logic [2:0] east_load_control_o,
+	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] east_load_control_o,
 	output logic [127:0] east_load_data_o,
 	output logic [3:0] east_load_strb_o,
 	output logic [11:0] east_load_destination_o,
@@ -167,7 +167,7 @@ module lpu_program_load_subsystem #(
 	logic word_fifo_empty;
 	logic distributor_input_valid;
 	logic distributor_input_ready;
-	logic [2:0] distributor_input_control;
+	logic [PROGRAM_LOAD_CONTROL_WIDTH-1:0] distributor_input_control;
 	logic [127:0] distributor_input_data;
 	logic [3:0] distributor_input_strb;
 	logic [1:0] distributor_input_scope;
@@ -191,7 +191,7 @@ module lpu_program_load_subsystem #(
 	// Distributor internal branches are gated by commit-scoreboard capacity before reaching targets.
 	logic distributor_west_valid;
 	logic distributor_west_ready;
-	logic [2:0] distributor_west_control;
+	logic [PROGRAM_LOAD_CONTROL_WIDTH-1:0] distributor_west_control;
 	logic [127:0] distributor_west_data;
 	logic [3:0] distributor_west_strb;
 	logic [11:0] distributor_west_destination;
@@ -199,7 +199,7 @@ module lpu_program_load_subsystem #(
 	logic distributor_west_last;
 	logic distributor_east_valid;
 	logic distributor_east_ready;
-	logic [2:0] distributor_east_control;
+	logic [PROGRAM_LOAD_CONTROL_WIDTH-1:0] distributor_east_control;
 	logic [127:0] distributor_east_data;
 	logic [3:0] distributor_east_strb;
 	logic [11:0] distributor_east_destination;

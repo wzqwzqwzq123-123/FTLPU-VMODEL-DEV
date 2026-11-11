@@ -21,7 +21,7 @@ module lpu_fu_subsystem_cluster #(
 
 	input logic [1:0] endpoint_load_valid_i,
 	output logic [1:0] endpoint_load_ready_o,
-	input logic [5:0] endpoint_load_control_i,
+	input logic [2*lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] endpoint_load_control_i,
 	input logic [255:0] endpoint_load_data_i,
 	input logic [7:0] endpoint_load_strb_i,
 	input logic [23:0] endpoint_load_destination_i,
@@ -307,43 +307,28 @@ module lpu_fu_subsystem_cluster #(
 				default: selected_valid_w[hemisphere] = 1'b0;
 			endcase
 
-			if((endpoint_load_control_i[hemisphere*3+:3] == PROGRAM_LOAD_CLEAR) ||
-				(endpoint_load_control_i[hemisphere*3+:3] == PROGRAM_LOAD_ABORT))begin
-				selected_valid_w[hemisphere] = destination_hemisphere_match_w[hemisphere];
-				selected_ready_w[hemisphere] = 1'b1;
-			end
-
 			endpoint_load_ready_o[hemisphere] = selected_ready_w[hemisphere] &&
-				((endpoint_load_control_i[hemisphere*3+:3] != PROGRAM_LOAD_WRITE) ||
+				((endpoint_load_control_i[hemisphere] != PROGRAM_LOAD_WRITE) ||
 				 !commit_valid_q[hemisphere] || endpoint_commit_ready_i[hemisphere]);
 			write_fire_w[hemisphere] = endpoint_load_valid_i[hemisphere] &&
 				endpoint_load_ready_o[hemisphere] &&
-				(endpoint_load_control_i[hemisphere*3+:3] == PROGRAM_LOAD_WRITE);
+				(endpoint_load_control_i[hemisphere] == PROGRAM_LOAD_WRITE);
 
 			mem_program_valid[hemisphere] = endpoint_load_valid_i[hemisphere] &&
 				endpoint_load_ready_o[hemisphere] &&
-				(((destination_target_kind_w[hemisphere*PROGRAM_TARGET_KIND_WIDTH+:
-				   PROGRAM_TARGET_KIND_WIDTH] == PROGRAM_TARGET_MEM) &&
-				  selected_valid_w[hemisphere]) ||
-				 ((endpoint_load_control_i[hemisphere*3+:3] == PROGRAM_LOAD_CLEAR) &&
-				  destination_hemisphere_match_w[hemisphere]) ||
-				 ((endpoint_load_control_i[hemisphere*3+:3] == PROGRAM_LOAD_ABORT) &&
-				  destination_hemisphere_match_w[hemisphere]));
+				(destination_target_kind_w[hemisphere*PROGRAM_TARGET_KIND_WIDTH+:
+				 PROGRAM_TARGET_KIND_WIDTH] == PROGRAM_TARGET_MEM) && selected_valid_w[hemisphere];
 
 			for(integer local_mxm = 0; local_mxm < 2; local_mxm = local_mxm + 1)begin
 				mxm_program_valid[hemisphere*2+local_mxm] = endpoint_load_valid_i[hemisphere] &&
 					endpoint_load_ready_o[hemisphere] &&
-					(((destination_target_kind_w[hemisphere*PROGRAM_TARGET_KIND_WIDTH+:
+					((destination_target_kind_w[hemisphere*PROGRAM_TARGET_KIND_WIDTH+:
 					   PROGRAM_TARGET_KIND_WIDTH] >= PROGRAM_TARGET_MXM_LOAD) &&
 					  (destination_target_kind_w[hemisphere*PROGRAM_TARGET_KIND_WIDTH+:
 					   PROGRAM_TARGET_KIND_WIDTH] <= PROGRAM_TARGET_MXM_COMPUTE) &&
 					  (destination_target_index_w[hemisphere*PROGRAM_TARGET_INDEX_WIDTH+:
 					   PROGRAM_TARGET_INDEX_WIDTH] == local_mxm) &&
-					  destination_hemisphere_match_w[hemisphere]) ||
-					 ((endpoint_load_control_i[hemisphere*3+:3] == PROGRAM_LOAD_CLEAR) &&
-					  destination_hemisphere_match_w[hemisphere]) ||
-					 ((endpoint_load_control_i[hemisphere*3+:3] == PROGRAM_LOAD_ABORT) &&
-					  destination_hemisphere_match_w[hemisphere]));
+					  destination_hemisphere_match_w[hemisphere]);
 			end
 
 			write_error_w[hemisphere] = write_fire_w[hemisphere] &&
@@ -360,10 +345,9 @@ module lpu_fu_subsystem_cluster #(
 				   (endpoint_load_imem_address_i[hemisphere*17+:17] >= MXM_IMEM_DEPTH))));
 			route_error_fire_w[hemisphere] = endpoint_load_valid_i[hemisphere] &&
 				endpoint_load_ready_o[hemisphere] &&
-				(((endpoint_load_control_i[hemisphere*3+:3] == PROGRAM_LOAD_PRIME) &&
+				(((endpoint_load_control_i[hemisphere] == PROGRAM_LOAD_PRIME) &&
 				  !selected_valid_w[hemisphere]) ||
-				 (endpoint_load_control_i[hemisphere*3+:3] > PROGRAM_LOAD_ABORT) ||
-				 ((endpoint_load_control_i[hemisphere*3+:3] != PROGRAM_LOAD_WRITE) &&
+				 ((endpoint_load_control_i[hemisphere] == PROGRAM_LOAD_PRIME) &&
 				  ((endpoint_load_data_i[hemisphere*128+:128] != '0) ||
 				   (endpoint_load_strb_i[hemisphere*4+:4] != '0))));
 		end
@@ -454,6 +438,7 @@ module lpu_fu_subsystem_cluster #(
 			logic mxm_fault;
 
 			lpu_mem_subsystem #(
+				.HEMISPHERE_INDEX(HEMISPHERE_INDEX),
 				.IMEM_DEPTH(MEM_IMEM_DEPTH),
 				.ACTIVE_CONTEXTS(ACTIVE_CONTEXTS),
 				.DEPTH_ROWS(MEM_DEPTH_ROWS),
@@ -472,9 +457,9 @@ module lpu_fu_subsystem_cluster #(
 					lpu_pkg::MEM_BANKS_PER_HEMISPHERE*32]),
 				.program_valid_i(mem_program_valid[HEMISPHERE_INDEX]),
 				.program_ready_o(mem_program_ready[HEMISPHERE_INDEX]),
-				.program_control_i(endpoint_load_control_i[HEMISPHERE_INDEX*3+:3]),
-				.program_queue_id_i(destination_target_index_w[
-					HEMISPHERE_INDEX*PROGRAM_TARGET_INDEX_WIDTH+:PROGRAM_TARGET_INDEX_WIDTH]),
+				.program_control_i(endpoint_load_control_i[HEMISPHERE_INDEX]),
+				.program_destination_i(endpoint_load_destination_i[
+					HEMISPHERE_INDEX*PROGRAM_DESTINATION_WIDTH+:PROGRAM_DESTINATION_WIDTH]),
 				.program_address_i(endpoint_load_imem_address_i[HEMISPHERE_INDEX*17+:17]),
 				.program_data_i(endpoint_load_data_i[HEMISPHERE_INDEX*128+:128]),
 				.program_strb_i(endpoint_load_strb_i[HEMISPHERE_INDEX*4+:4]),
@@ -525,6 +510,7 @@ module lpu_fu_subsystem_cluster #(
 			for(genvar local_mxm_gen = 0; local_mxm_gen < 2; local_mxm_gen = local_mxm_gen + 1)begin : gen_mxm
 				localparam integer MXM_INDEX = HEMISPHERE_INDEX*2 + local_mxm_gen;
 				lpu_mxm_subsystem #(
+					.HEMISPHERE_INDEX(HEMISPHERE_INDEX),
 					.LOCAL_MXM_INDEX(local_mxm_gen),
 					.IMEM_DEPTH(MXM_IMEM_DEPTH),
 					.ACTIVE_CONTEXTS(ACTIVE_CONTEXTS),
@@ -546,9 +532,9 @@ module lpu_fu_subsystem_cluster #(
 						qctl_queue_cycle[(QCTL_MXM_LOAD_BASE+MXM_INDEX)*32+:32]}),
 					.program_valid_i(mxm_program_valid[MXM_INDEX]),
 					.program_ready_o(mxm_program_ready[MXM_INDEX]),
-					.program_control_i(endpoint_load_control_i[HEMISPHERE_INDEX*3+:3]),
-					.program_target_kind_i({1'b0, destination_target_kind_w[
-						HEMISPHERE_INDEX*PROGRAM_TARGET_KIND_WIDTH+:PROGRAM_TARGET_KIND_WIDTH]}),
+					.program_control_i(endpoint_load_control_i[HEMISPHERE_INDEX]),
+					.program_destination_i(endpoint_load_destination_i[
+						HEMISPHERE_INDEX*PROGRAM_DESTINATION_WIDTH+:PROGRAM_DESTINATION_WIDTH]),
 					.program_address_i(endpoint_load_imem_address_i[HEMISPHERE_INDEX*17+:17]),
 					.program_data_i(endpoint_load_data_i[HEMISPHERE_INDEX*128+:128]),
 					.program_strb_i(endpoint_load_strb_i[HEMISPHERE_INDEX*4+:4]),

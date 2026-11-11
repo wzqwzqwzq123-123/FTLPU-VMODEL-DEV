@@ -156,7 +156,7 @@ module lpu_top #(
 	logic [138*416-1:0] program_dispatch_payload;
 	logic [1:0] endpoint_load_valid;
 	logic [1:0] endpoint_load_ready;
-	logic [5:0] endpoint_load_control;
+	logic [2*lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] endpoint_load_control;
 	logic [255:0] endpoint_load_data;
 	logic [7:0] endpoint_load_strb;
 	logic [23:0] endpoint_load_destination;

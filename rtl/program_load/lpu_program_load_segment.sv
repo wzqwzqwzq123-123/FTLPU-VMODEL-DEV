@@ -9,7 +9,7 @@ module lpu_program_load_segment #(
 
 	input logic input_valid_i,
 	output logic input_ready_o,
-	input logic [2:0] input_control_i,
+	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] input_control_i,
 	input logic [127:0] input_data_i,
 	input logic [3:0] input_strb_i,
 	input logic [1:0] input_scope_i,
@@ -19,7 +19,7 @@ module lpu_program_load_segment #(
 
 	output logic local_valid_o,
 	input logic local_ready_i,
-	output logic [2:0] local_control_o,
+	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] local_control_o,
 	output logic [127:0] local_data_o,
 	output logic [3:0] local_strb_o,
 	output logic [1:0] local_scope_o,
@@ -29,7 +29,7 @@ module lpu_program_load_segment #(
 
 	output logic forward_valid_o,
 	input logic forward_ready_i,
-	output logic [2:0] forward_control_o,
+	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] forward_control_o,
 	output logic [127:0] forward_data_o,
 	output logic [3:0] forward_strb_o,
 	output logic [1:0] forward_scope_o,
@@ -43,7 +43,7 @@ module lpu_program_load_segment #(
 
 	logic head_valid;
 	logic head_ready;
-	logic [2:0] head_control;
+	logic [PROGRAM_LOAD_CONTROL_WIDTH-1:0] head_control;
 	logic [127:0] head_data;
 	logic [3:0] head_strb;
 	logic [1:0] head_scope;
@@ -54,7 +54,6 @@ module lpu_program_load_segment #(
 	logic head_last;
 	logic elastic_idle;
 
-	logic broadcast_w;
 	logic target_kind_match_w;
 	logic queue_in_segment_w;
 	logic local_required_w;
@@ -101,13 +100,11 @@ module lpu_program_load_segment #(
 
 	assign head_target_kind = head_destination[PROGRAM_DESTINATION_KIND_MSB:PROGRAM_DESTINATION_KIND_LSB];
 	assign head_target_index = head_destination[PROGRAM_DESTINATION_INDEX_MSB:PROGRAM_DESTINATION_INDEX_LSB];
-	assign broadcast_w = head_control != PROGRAM_LOAD_WRITE;
 	assign target_kind_match_w = head_target_kind == SEGMENT_TARGET_KIND;
 	assign queue_in_segment_w = (head_target_index >= QUEUE_BASE) &&
 		(head_target_index < QUEUE_BASE + QUEUE_COUNT);
-	assign local_required_w = target_kind_match_w &&
-		(broadcast_w || queue_in_segment_w);
-	assign forward_required_w = broadcast_w || !local_required_w;
+	assign local_required_w = target_kind_match_w && queue_in_segment_w;
+	assign forward_required_w = !local_required_w;
 
 	assign local_valid_o = head_valid && local_required_w && !local_done_q;
 	assign forward_valid_o = head_valid && forward_required_w && !forward_done_q;
@@ -134,7 +131,7 @@ module lpu_program_load_segment #(
 	assign forward_last_o = head_last;
 	assign idle_o = elastic_idle && !local_done_q && !forward_done_q;
 
-	// A broadcast may complete its local and forward branches on different cycles.
+	// Every WRITE or PRIME command names one destination and takes exactly one branch.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			local_done_q <= 1'b0;

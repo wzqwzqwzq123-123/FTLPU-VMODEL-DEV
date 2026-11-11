@@ -58,7 +58,7 @@ module lpu_program_control_system #(
 	// ICU owns DMA/reassembly/routing; FU subsystems own every local iMEM and execution frontend.
 	output logic [1:0] endpoint_load_valid_o,
 	input logic [1:0] endpoint_load_ready_i,
-	output logic [5:0] endpoint_load_control_o,
+	output logic [2*lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] endpoint_load_control_o,
 	output logic [255:0] endpoint_load_data_o,
 	output logic [7:0] endpoint_load_strb_o,
 	output logic [23:0] endpoint_load_destination_o,
@@ -99,7 +99,7 @@ module lpu_program_control_system #(
 
 	logic west_load_valid;
 	logic west_load_ready;
-	logic [2:0] west_load_control;
+	logic [PROGRAM_LOAD_CONTROL_WIDTH-1:0] west_load_control;
 	logic [127:0] west_load_data;
 	logic [3:0] west_load_strb;
 	logic [11:0] west_load_destination;
@@ -107,7 +107,7 @@ module lpu_program_control_system #(
 	logic west_load_last;
 	logic east_load_valid;
 	logic east_load_ready;
-	logic [2:0] east_load_control;
+	logic [PROGRAM_LOAD_CONTROL_WIDTH-1:0] east_load_control;
 	logic [127:0] east_load_data;
 	logic [3:0] east_load_strb;
 	logic [11:0] east_load_destination;
@@ -116,7 +116,7 @@ module lpu_program_control_system #(
 
 	logic [1:0] cluster_load_valid;
 	logic [1:0] cluster_load_ready;
-	logic [5:0] cluster_load_control;
+	logic [2*PROGRAM_LOAD_CONTROL_WIDTH-1:0] cluster_load_control;
 	logic [255:0] cluster_load_data;
 	logic [7:0] cluster_load_strb;
 	logic [23:0] cluster_load_destination;
