@@ -140,6 +140,7 @@ module lpu_fu_subsystem_cluster #(
 	logic started_q;
 	logic [31:0] schedule_cycle_q;
 	logic execution_run;
+	logic program_transport_rst_ni;
 	logic route_fault_q;
 	logic [1:0] selected_ready_w;
 	logic [1:0] selected_valid_w;
@@ -180,6 +181,18 @@ module lpu_fu_subsystem_cluster #(
 	logic [3:0] mxm_frontends_idle;
 	logic [3:0] mxm_frontend_fault;
 	logic [23:0] mxm_frontend_fault_code;
+	logic [1:0] sxm_program_valid;
+	logic [1:0] sxm_program_ready;
+	logic [1:0] sxm_program_error;
+	logic vxm_program_valid;
+	logic vxm_program_ready;
+	logic vxm_program_error;
+	logic [PROGRAM_LOAD_CONTROL_WIDTH-1:0] vxm_program_control;
+	logic [PROGRAM_DESTINATION_WIDTH-1:0] vxm_program_destination;
+	logic [16:0] vxm_program_address;
+	logic [127:0] vxm_program_data;
+	logic [3:0] vxm_program_strb;
+	logic vxm_program_last;
 
 	logic [2*4*32-1:0] mem_to_vxm_west_valid;
 	logic [2*4*32*64-1:0] mem_to_vxm_west_data;
@@ -224,6 +237,7 @@ module lpu_fu_subsystem_cluster #(
 	logic [1:0] relay_source_fire_w;
 
 	assign execution_run = local_frontend_enable_i ? started_q : external_run_i;
+	assign program_transport_rst_ni = rst_ni && !program_reset_i;
 	assign started_o = started_q;
 	assign schedule_cycle_o = schedule_cycle_q;
 	assign endpoint_commit_valid_o = commit_valid_q;
@@ -341,7 +355,7 @@ module lpu_fu_subsystem_cluster #(
 				.SXM_INSTANCES_PER_HEMISPHERE(1)
 			) u_program_relay_chain (
 				.clk_i,
-				.rst_ni,
+				.rst_ni(program_transport_rst_ni),
 				.input_valid_i(relay_chain_input_valid[chain_gen]),
 				.input_ready_o(relay_chain_input_ready[chain_gen]),
 				.input_control_i(endpoint_load_control_i[
@@ -417,6 +431,14 @@ module lpu_fu_subsystem_cluster #(
 		mem_program_strb = '0;
 		mem_program_last = '0;
 		mxm_program_valid = '0;
+		sxm_program_valid = '0;
+		vxm_program_valid = 1'b0;
+		vxm_program_control = '0;
+		vxm_program_destination = '0;
+		vxm_program_address = '0;
+		vxm_program_data = '0;
+		vxm_program_strb = '0;
+		vxm_program_last = 1'b0;
 		outer_program_control = '0;
 		outer_program_destination = '0;
 		outer_program_address = '0;
@@ -487,22 +509,37 @@ module lpu_fu_subsystem_cluster #(
 				default: selected_valid_w[hemisphere] = 1'b0;
 			endcase
 
-			if((endpoint_kind == PROGRAM_TARGET_VXM) ||
-				(endpoint_kind == PROGRAM_TARGET_SXM_TRANSPOSE) ||
-				(endpoint_kind == PROGRAM_TARGET_SXM_PERMUTE))begin
-				// VXM uses the canonical direct branch and SXM terminates at R6, but
-				// neither local-iMEM transport is integrated yet. Do not capture a
-				// request that no real FU Frontend can eventually acknowledge.
-				selected_ready_w[hemisphere] = 1'b0;
-			end
-			else if(selected_valid_w[hemisphere])begin
-				selected_ready_w[hemisphere] = relay_chain_input_ready[hemisphere];
-				relay_chain_input_valid[hemisphere] = endpoint_load_valid_i[hemisphere];
-			end
-			else begin
+			if(!selected_valid_w[hemisphere])begin
 				selected_ready_w[hemisphere] =
 					(endpoint_load_control_i[hemisphere] != PROGRAM_LOAD_WRITE) ||
 					completion_slot_ready_w[hemisphere];
+			end
+			else if(endpoint_kind == PROGRAM_TARGET_VXM)begin
+				// The shared VXM bypasses both Relay chains. The Subsystem boundary
+				// currently holds Ready low until its resident-config adapter exists.
+				selected_can_complete =
+					(endpoint_load_control_i[hemisphere] != PROGRAM_LOAD_WRITE) ||
+					completion_slot_ready_w[hemisphere];
+				vxm_program_valid = endpoint_load_valid_i[hemisphere] && selected_can_complete;
+				vxm_program_control = endpoint_load_control_i[
+					hemisphere*PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH];
+				vxm_program_destination = endpoint_load_destination_i[hemisphere*12+:12];
+				vxm_program_address = endpoint_load_imem_address_i[hemisphere*17+:17];
+				vxm_program_data = endpoint_load_data_i[hemisphere*128+:128];
+				vxm_program_strb = endpoint_load_strb_i[hemisphere*4+:4];
+				vxm_program_last = endpoint_load_last_i[hemisphere];
+				selected_ready_w[hemisphere] = vxm_program_ready && selected_can_complete;
+				if(vxm_program_valid && vxm_program_ready &&
+					(endpoint_load_control_i[hemisphere] == PROGRAM_LOAD_WRITE))begin
+					write_fire_w[hemisphere] = 1'b1;
+					write_error_w[hemisphere] = vxm_program_error;
+				end
+			end
+			else begin
+				// SXM requests enter the physical Relay chain and remain stalled at
+				// R6 until the Subsystem exposes a real local-iMEM receiver.
+				selected_ready_w[hemisphere] = relay_chain_input_ready[hemisphere];
+				relay_chain_input_valid[hemisphere] = endpoint_load_valid_i[hemisphere];
 			end
 			endpoint_load_ready_o[hemisphere] = selected_ready_w[hemisphere];
 
@@ -592,7 +629,21 @@ module lpu_fu_subsystem_cluster #(
 							mxm_program_error[hemisphere*2+selected_outer_index];
 					end
 				end
-				// SXM remains explicit backpressure until its local-iMEM transport exists.
+				else if(((selected_outer_kind == PROGRAM_TARGET_SXM_TRANSPOSE) ||
+					(selected_outer_kind == PROGRAM_TARGET_SXM_PERMUTE)) &&
+					(selected_outer_index == 0))begin
+					sxm_program_valid[hemisphere] = relay_outer_valid[hemisphere] &&
+						selected_can_complete;
+					relay_outer_ready[hemisphere] = sxm_program_ready[hemisphere] &&
+						selected_can_complete;
+					relay_source_fire_w[hemisphere] = relay_outer_valid[hemisphere] &&
+						relay_outer_ready[hemisphere];
+					if(relay_source_fire_w[hemisphere] &&
+						(selected_control == PROGRAM_LOAD_WRITE))begin
+						write_fire_w[hemisphere] = 1'b1;
+						write_error_w[hemisphere] = sxm_program_error[hemisphere];
+					end
+				end
 			end
 		end
 	end
@@ -773,6 +824,17 @@ module lpu_fu_subsystem_cluster #(
 
 			lpu_sxm_subsystem u_sxm_subsystem (
 				.clk_i, .rst_ni, .run_i(execution_run),
+				.program_valid_i(sxm_program_valid[HEMISPHERE_INDEX]),
+				.program_ready_o(sxm_program_ready[HEMISPHERE_INDEX]),
+				.program_control_i(outer_program_control[
+					HEMISPHERE_INDEX*PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH]),
+				.program_destination_i(outer_program_destination[
+					HEMISPHERE_INDEX*PROGRAM_DESTINATION_WIDTH+:PROGRAM_DESTINATION_WIDTH]),
+				.program_address_i(outer_program_address[HEMISPHERE_INDEX*17+:17]),
+				.program_data_i(outer_program_data[HEMISPHERE_INDEX*128+:128]),
+				.program_strb_i(outer_program_strb[HEMISPHERE_INDEX*4+:4]),
+				.program_last_i(outer_program_last[HEMISPHERE_INDEX]),
+				.program_error_o(sxm_program_error[HEMISPHERE_INDEX]),
 				.transpose_issue_valid_i(external_sxm_transpose_issue_valid_i[HEMISPHERE_INDEX]),
 				.transpose_issue_instruction_i(external_sxm_transpose_issue_instruction_i[HEMISPHERE_INDEX*416+:416]),
 				.permute_issue_valid_i(external_sxm_permute_issue_valid_i[HEMISPHERE_INDEX]),
@@ -885,6 +947,15 @@ module lpu_fu_subsystem_cluster #(
 
 	lpu_vxm_subsystem u_vxm_subsystem (
 		.clk_i, .rst_ni, .run_i(execution_run),
+		.program_valid_i(vxm_program_valid),
+		.program_ready_o(vxm_program_ready),
+		.program_control_i(vxm_program_control),
+		.program_destination_i(vxm_program_destination),
+		.program_address_i(vxm_program_address),
+		.program_data_i(vxm_program_data),
+		.program_strb_i(vxm_program_strb),
+		.program_last_i(vxm_program_last),
+		.program_error_o(vxm_program_error),
 		.local_issue_valid_i(external_vxm_local_issue_valid_i),
 		.local_issue_instruction_i(external_vxm_local_issue_instruction_i),
 		.global_issue_valid_i(external_vxm_global_issue_valid_i),
