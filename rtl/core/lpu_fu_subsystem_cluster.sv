@@ -6,8 +6,9 @@ module lpu_fu_subsystem_cluster #(
 	parameter integer ACTIVE_MEM_COLUMNS = 52,
 	parameter integer MXM_ACCUMULATOR_BLOCK_COUNT = lpu_pkg::MXM_ACCUMULATOR_BLOCK_COUNT,
 	parameter bit USE_SRAM_MACRO = 1'b0,
+	parameter bit USE_NATIVE_MEM = 1'b1,
 	parameter bit ENABLE_QCTL = 1'b0,
-	parameter integer QCTL_QUEUE_COUNT = 116,
+	parameter integer QCTL_QUEUE_COUNT = 220,
 	parameter integer QCTL_POOL_DEPTH = 512,
 	parameter integer QCTL_QUEUE_ENTRY_LIMIT = 16,
 	parameter integer QCTL_CACHE_DEPTH = 4
@@ -40,7 +41,7 @@ module lpu_fu_subsystem_cluster #(
 	output logic frontend_fault_o,
 	output logic [5:0] frontend_fault_code_o,
 
-	// QCTL has 104 MEM lanes followed by four MXM Load, four Dequant and
+	// QCTL has 208 MEM Bank lanes followed by four MXM Load, four Dequant and
 	// four Compute lanes. VXM/SXM Queue IDs remain reserved for later closure.
 	input logic qctl_load_mode_i,
 	input logic qctl_partition_valid_i,
@@ -71,8 +72,9 @@ module lpu_fu_subsystem_cluster #(
 	output logic qctl_fault_o,
 	output logic [7:0] qctl_fault_code_o,
 
-	input logic [103:0] external_mem_issue_valid_i,
-	input logic [104*47-1:0] external_mem_issue_instruction_i,
+	input logic [lpu_pkg::MEM_BANK_COUNT-1:0] external_mem_issue_valid_i,
+	output logic [lpu_pkg::MEM_BANK_COUNT-1:0] external_mem_issue_ready_o,
+	input logic [lpu_pkg::MEM_BANK_COUNT*lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] external_mem_issue_instruction_i,
 	input logic [3:0] external_mxm_load_issue_valid_i,
 	input logic [4*48-1:0] external_mxm_load_issue_instruction_i,
 	input logic [3:0] external_mxm_dequant_issue_valid_i,
@@ -88,9 +90,9 @@ module lpu_fu_subsystem_cluster #(
 	input logic external_vxm_global_issue_valid_i,
 	input logic [lpu_pkg::VXM_GLOBAL_CONFIG_WIDTH-1:0] external_vxm_global_issue_instruction_i,
 
-	output logic [103:0] local_mem_issue_valid_o,
-	output logic [104*47-1:0] local_mem_issue_instruction_o,
-	output logic [104*32-1:0] local_mem_issue_cycle_o,
+	output logic [lpu_pkg::MEM_BANK_COUNT-1:0] local_mem_issue_valid_o,
+	output logic [lpu_pkg::MEM_BANK_COUNT*lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] local_mem_issue_instruction_o,
+	output logic [lpu_pkg::MEM_BANK_COUNT*32-1:0] local_mem_issue_cycle_o,
 	output logic [3:0] local_mxm_load_issue_valid_o,
 	output logic [4*29-1:0] local_mxm_load_issue_instruction_o,
 	output logic [4*32-1:0] local_mxm_load_issue_cycle_o,
@@ -109,7 +111,7 @@ module lpu_fu_subsystem_cluster #(
 	input logic [2*4*32*64-1:0] mem_west_edge_data_i,
 	output logic [2*4*32-1:0] mem_west_edge_valid_o,
 	output logic [2*4*32*64-1:0] mem_west_edge_data_o,
-	output logic [2*52*4-1:0] mem_fault_o,
+	output logic [lpu_pkg::MEM_BANK_COUNT-1:0] mem_fault_o,
 	output logic [1:0] mxm_fault_o,
 	output logic [1:0] sxm_fault_o,
 	output logic vxm_fault_o,
@@ -121,9 +123,9 @@ module lpu_fu_subsystem_cluster #(
 	localparam logic [5:0] FAULT_ROUTE = 6'd1;
 	localparam logic [5:0] FAULT_FRONTEND = 6'd2;
 	localparam logic [5:0] FAULT_QCTL = 6'd3;
-	localparam integer QCTL_MXM_LOAD_BASE = 104;
-	localparam integer QCTL_MXM_DEQUANT_BASE = 108;
-	localparam integer QCTL_MXM_COMPUTE_BASE = 112;
+	localparam integer QCTL_MXM_LOAD_BASE = lpu_pkg::MEM_BANK_COUNT;
+	localparam integer QCTL_MXM_DEQUANT_BASE = QCTL_MXM_LOAD_BASE + 4;
+	localparam integer QCTL_MXM_COMPUTE_BASE = QCTL_MXM_DEQUANT_BASE + 4;
 
 	logic started_q;
 	logic [31:0] schedule_cycle_q;
@@ -263,8 +265,10 @@ module lpu_fu_subsystem_cluster #(
 			selected_ready_w[hemisphere] = 1'b1;
 			case(endpoint_load_target_kind_i[hemisphere*4+:4])
 				PROGRAM_TARGET_MEM: begin
-					selected_valid_w[hemisphere] = 1'b1;
-					selected_ready_w[hemisphere] = mem_program_ready[hemisphere];
+					selected_valid_w[hemisphere] =
+						endpoint_load_queue_id_i[hemisphere*8+:8] < lpu_pkg::MEM_BANKS_PER_HEMISPHERE;
+					selected_ready_w[hemisphere] = selected_valid_w[hemisphere] ?
+						mem_program_ready[hemisphere] : 1'b1;
 				end
 				PROGRAM_TARGET_MXM_LOAD,
 				PROGRAM_TARGET_MXM_DEQUANT,
@@ -293,7 +297,8 @@ module lpu_fu_subsystem_cluster #(
 
 			mem_program_valid[hemisphere] = endpoint_load_valid_i[hemisphere] &&
 				endpoint_load_ready_o[hemisphere] &&
-				((endpoint_load_target_kind_i[hemisphere*4+:4] == PROGRAM_TARGET_MEM) ||
+				(((endpoint_load_target_kind_i[hemisphere*4+:4] == PROGRAM_TARGET_MEM) &&
+				  selected_valid_w[hemisphere]) ||
 				 (endpoint_load_control_i[hemisphere*3+:3] == PROGRAM_LOAD_CLEAR) ||
 				 (endpoint_load_control_i[hemisphere*3+:3] == PROGRAM_LOAD_ABORT));
 
@@ -416,13 +421,18 @@ module lpu_fu_subsystem_cluster #(
 				.ACTIVE_CONTEXTS(ACTIVE_CONTEXTS),
 				.DEPTH_ROWS(MEM_DEPTH_ROWS),
 				.ACTIVE_COLUMNS(ACTIVE_MEM_COLUMNS),
-				.USE_SRAM_MACRO(USE_SRAM_MACRO)
+				.USE_SRAM_MACRO(USE_SRAM_MACRO),
+				.USE_NATIVE_MEM(USE_NATIVE_MEM)
 			) u_mem_subsystem (
 				.clk_i, .rst_ni, .program_reset_i, .local_frontend_enable_i,
 				.run_i(execution_run), .schedule_cycle_i(schedule_cycle_q),
-				.qctl_active_i(qctl_queue_active_o[HEMISPHERE_INDEX*52+:52]),
-				.qctl_scheduler_enable_i(qctl_scheduler_enable[HEMISPHERE_INDEX*52+:52]),
-				.qctl_schedule_cycle_i(qctl_queue_cycle[HEMISPHERE_INDEX*52*32+:52*32]),
+				.qctl_active_i(qctl_queue_active_o[
+					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
+				.qctl_scheduler_enable_i(qctl_scheduler_enable[
+					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
+				.qctl_schedule_cycle_i(qctl_queue_cycle[
+					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE*32+:
+					lpu_pkg::MEM_BANKS_PER_HEMISPHERE*32]),
 				.program_valid_i(mem_program_valid[HEMISPHERE_INDEX]),
 				.program_ready_o(mem_program_ready[HEMISPHERE_INDEX]),
 				.program_control_i(endpoint_load_control_i[HEMISPHERE_INDEX*3+:3]),
@@ -432,11 +442,21 @@ module lpu_fu_subsystem_cluster #(
 				.program_strb_i(endpoint_load_strb_i[HEMISPHERE_INDEX*4+:4]),
 				.program_last_i(endpoint_load_last_i[HEMISPHERE_INDEX]),
 				.program_error_o(mem_program_error[HEMISPHERE_INDEX]),
-				.external_issue_valid_i(external_mem_issue_valid_i[HEMISPHERE_INDEX*52+:52]),
-				.external_issue_instruction_i(external_mem_issue_instruction_i[HEMISPHERE_INDEX*52*47+:52*47]),
-				.local_issue_valid_o(local_mem_issue_valid_o[HEMISPHERE_INDEX*52+:52]),
-				.local_issue_instruction_o(local_mem_issue_instruction_o[HEMISPHERE_INDEX*52*47+:52*47]),
-				.local_issue_cycle_o(local_mem_issue_cycle_o[HEMISPHERE_INDEX*52*32+:52*32]),
+				.external_issue_valid_i(external_mem_issue_valid_i[
+					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
+				.external_issue_ready_o(external_mem_issue_ready_o[
+					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
+				.external_issue_instruction_i(external_mem_issue_instruction_i[
+					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE*lpu_pkg::MEM_INSTRUCTION_WIDTH+:
+					lpu_pkg::MEM_BANKS_PER_HEMISPHERE*lpu_pkg::MEM_INSTRUCTION_WIDTH]),
+				.local_issue_valid_o(local_mem_issue_valid_o[
+					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
+				.local_issue_instruction_o(local_mem_issue_instruction_o[
+					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE*lpu_pkg::MEM_INSTRUCTION_WIDTH+:
+					lpu_pkg::MEM_BANKS_PER_HEMISPHERE*lpu_pkg::MEM_INSTRUCTION_WIDTH]),
+				.local_issue_cycle_o(local_mem_issue_cycle_o[
+					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE*32+:
+					lpu_pkg::MEM_BANKS_PER_HEMISPHERE*32]),
 				.frontends_ready_o(mem_frontends_ready[HEMISPHERE_INDEX]),
 				.frontends_idle_o(mem_frontends_idle[HEMISPHERE_INDEX]),
 				.frontend_fault_o(mem_frontend_fault[HEMISPHERE_INDEX]),
@@ -446,7 +466,9 @@ module lpu_fu_subsystem_cluster #(
 				.east_edge_valid_o(mem_east_valid), .east_edge_data_o(mem_east_data),
 				.west_edge_valid_i(sxm_west_valid), .west_edge_data_i(sxm_west_data),
 				.west_edge_valid_o(mem_west_valid), .west_edge_data_o(mem_west_data),
-				.mem_fault_o(mem_fault_o[HEMISPHERE_INDEX*52*4+:52*4]),
+				.mem_fault_o(mem_fault_o[
+					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:
+					lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
 				.conflict_o(mem_stream_conflict)
 			);
 

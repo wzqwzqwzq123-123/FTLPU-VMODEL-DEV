@@ -7,7 +7,7 @@ module lpu_mem_srf_sxm_roundtrip_integration #(
   parameter integer LOCAL_PRODUCERS=2, LOCAL_CONSUMERS=2
 ) (
   input logic clk_i,rst_ni,input logic [MEM_SLICES*2-1:0] vmodel_mem_issue_valid_i,
-  input logic [MEM_SLICES*2*47-1:0] vmodel_mem_issue_instruction_i,
+  input logic [MEM_SLICES*2*lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] vmodel_mem_issue_instruction_i,
   output logic [MEM_SLICES*2-1:0] native_mem_issue_valid_o,mem_command_fault_o,
   output logic [MEM_SLICES*2*32-1:0] native_mem_issue_o,
   input logic vmodel_transpose_valid_i,input logic [415:0] vmodel_transpose_instruction_i,

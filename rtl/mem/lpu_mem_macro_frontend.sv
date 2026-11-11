@@ -17,7 +17,7 @@ module lpu_mem_macro_frontend #(
 
 	output logic        issue_valid_o,
 	input  logic        issue_ready_i,
-	output logic [46:0] issue_instruction_o,
+	output logic [lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] issue_instruction_o,
 	output logic [31:0] issue_cycle_o,
 
 	output logic        decoder_done_o,

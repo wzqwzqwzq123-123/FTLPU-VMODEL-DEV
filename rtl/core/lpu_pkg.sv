@@ -11,12 +11,18 @@ package lpu_pkg;
 
   localparam integer MEM_SLICES_PER_HEMISPHERE = 52;
   localparam integer MEM_SLICE_COUNT            = 104;
+  localparam integer MEM_BANKS_PER_SLICE        = 2;
+  localparam integer MEM_BANKS_PER_HEMISPHERE   =
+    MEM_SLICES_PER_HEMISPHERE * MEM_BANKS_PER_SLICE;
+  localparam integer MEM_BANK_COUNT             =
+    HEMISPHERES * MEM_BANKS_PER_HEMISPHERE;
   localparam integer MEM_SLICES_PER_GROUP       = 4;
   localparam integer MEM_GROUPS                 = 13;
   localparam integer STREAM_REGISTER_COLUMNS    = 15;
   localparam integer MEM_BOUNDARY_COLUMN        = 13;
   localparam integer MXM_BOUNDARY_COLUMN        = 14;
-  localparam integer SRAM_DEPTH_ROWS            = 65536;
+  // Current LPU32 formal profile uses 8192 bank-local rows (13 address bits).
+  localparam integer SRAM_DEPTH_ROWS            = 8192;
   localparam integer SRAM_ROW_BYTES             = 32;
 
   localparam integer MXMS_PER_HEMISPHERE  = 2;
@@ -136,7 +142,12 @@ package lpu_pkg;
   localparam integer VXM_SPECIAL_EXP         = 1;
   localparam integer VXM_SPECIAL_RECIP_RSQRT = 2;
 
-  localparam integer MEM_INSTRUCTION_WIDTH = 47;
+  // Formal MEM machine code is a 64-bit transport container.  Its lower
+  // 32 bits carry the current ISA; Native MEM derives a private 32-bit
+  // control word from this encoding inside the FU boundary.
+  localparam integer MEM_INSTRUCTION_WIDTH = 64;
+  localparam integer MEM_NATIVE_COMMAND_WIDTH = 32;
+  localparam integer MEM_ADDRESS_WIDTH = 13;
   localparam integer MXM_INSTRUCTION_WIDTH = 48;
   localparam integer VXM_INSTRUCTION_WIDTH = 128;
   localparam integer SXM_INSTRUCTION_WIDTH = 416;
@@ -174,11 +185,11 @@ package lpu_pkg;
   } hemisphere_e;
 
   typedef enum logic [2:0] {
-    MEM_READ       = 3'd0,
-    MEM_WRITE      = 3'd1,
-    MEM_READ_WRITE = 3'd2,
-    MEM_GATHER     = 3'd3,
-    MEM_SCATTER    = 3'd4
+    MEM_READ    = 3'd0,
+    MEM_WRITE   = 3'd1,
+    // Opcode 2 is the retired dual-port ReadWrite operation.
+    MEM_GATHER  = 3'd3,
+    MEM_SCATTER = 3'd4
   } mem_opcode_e;
 
   typedef enum logic [1:0] {
@@ -224,6 +235,17 @@ package lpu_pkg;
     input logic [4:0] index
   );
     packed_stream = {direction_west, index};
+  endfunction
+
+  // Global Bank Queue identity; Program Load transports hemisphere and the
+  // 0..103 local index separately but QCTL uses the flattened 0..207 value.
+  function automatic integer mem_bank_queue_id(
+    input integer hemisphere,
+    input integer slice_id,
+    input integer bank_id
+  );
+    mem_bank_queue_id = hemisphere * MEM_BANKS_PER_HEMISPHERE +
+      slice_id * MEM_BANKS_PER_SLICE + bank_id;
   endfunction
 
   function automatic integer vxm_local_instruction_width(

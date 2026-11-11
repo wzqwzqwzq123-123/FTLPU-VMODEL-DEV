@@ -5,7 +5,7 @@ module lpu_mem_column #(
   input  logic clk_i,
   input  logic rst_ni,
   input  logic issue_valid_i,
-  input  logic [46:0] issue_instruction_i,
+  input  logic [lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] issue_instruction_i,
 
   input  logic [4*64-1:0] tile_rx_valid_i,
   input  logic [4*64*64-1:0] tile_rx_data_i,
@@ -17,9 +17,9 @@ module lpu_mem_column #(
   output logic [3:0] tile_fault_o
 );
   logic [3:0] instruction_valid;
-  logic [4*47-1:0] instruction_payload;
+  logic [4*lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] instruction_payload;
 
-  lpu_control_pipeline #(.WIDTH(47), .ROWS(4)) u_control (
+  lpu_control_pipeline #(.WIDTH(lpu_pkg::MEM_INSTRUCTION_WIDTH), .ROWS(4)) u_control (
     .clk_i,
     .rst_ni,
     .issue_valid_i,
@@ -45,7 +45,8 @@ module lpu_mem_column #(
         .clk_i,
         .rst_ni,
         .instruction_valid_i(instruction_valid[TILE_INDEX]),
-        .instruction_i(instruction_payload[TILE_INDEX*47 +: 47]),
+        .instruction_i(instruction_payload[
+          TILE_INDEX*lpu_pkg::MEM_INSTRUCTION_WIDTH +: lpu_pkg::MEM_INSTRUCTION_WIDTH]),
         .rx_valid_i(tile_rx_valid_i[TILE_INDEX*64 +: 64]),
         .rx_data_i(tile_rx_data_i[TILE_INDEX*64*64 +: 64*64]),
         .rx_consume_o(rx_consume),

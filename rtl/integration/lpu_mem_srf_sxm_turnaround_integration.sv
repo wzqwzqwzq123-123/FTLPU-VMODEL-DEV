@@ -9,7 +9,7 @@ module lpu_mem_srf_sxm_turnaround_integration #(
 ) (
   input logic clk_i, rst_ni,
   input logic [MEM_SLICES*2-1:0] vmodel_mem_issue_valid_i,
-  input logic [MEM_SLICES*2*47-1:0] vmodel_mem_issue_instruction_i,
+  input logic [MEM_SLICES*2*lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] vmodel_mem_issue_instruction_i,
   output logic [MEM_SLICES*2-1:0] native_mem_issue_valid_o, mem_command_fault_o,
   output logic [MEM_SLICES*2*32-1:0] native_mem_issue_o,
   input logic vmodel_transpose_valid_i, input logic [415:0] vmodel_transpose_instruction_i,
@@ -38,6 +38,7 @@ module lpu_mem_srf_sxm_turnaround_integration #(
   localparam integer CONSUME=2*COLUMNS*SUPERLANES*LOCAL_CONSUMERS*STREAMS;
   localparam integer SXM_STREAMS=16;
   logic [MEM_SLICES*2-1:0] native_mem_valid;
+  logic [MEM_SLICES*2-1:0] mem_command_unsupported;
   logic [MEM_SLICES*2*32-1:0] native_mem_cmd;
   logic [BOUNDARIES*256-1:0] mem_state_valid;
   logic [BOUNDARIES*256*SEGMENT_BITS-1:0] mem_state_data;
@@ -61,8 +62,11 @@ module lpu_mem_srf_sxm_turnaround_integration #(
   assign native_mem_issue_o=native_mem_cmd;
   generate for(genvar b=0;b<MEM_SLICES*2;b=b+1) begin: g_mem_cmd
     lpu_mem_command_adapter u(.issue_valid_i(vmodel_mem_issue_valid_i[b]),
-      .issue_instruction_i(vmodel_mem_issue_instruction_i[b*47+:47]), .native_valid_o(native_mem_valid[b]),
-      .native_command_o(native_mem_cmd[b*32+:32]), .command_fault_o(mem_command_fault_o[b]));
+      .issue_instruction_i(vmodel_mem_issue_instruction_i[
+        b*lpu_pkg::MEM_INSTRUCTION_WIDTH+:lpu_pkg::MEM_INSTRUCTION_WIDTH]),
+      .native_valid_o(native_mem_valid[b]),
+      .native_command_o(native_mem_cmd[b*32+:32]), .command_fault_o(mem_command_fault_o[b]),
+      .command_unsupported_o(mem_command_unsupported[b]));
   end endgenerate
   lpu_sxm_command_adapter u_sxm_cmd(.vmodel_transpose_valid_i,.vmodel_transpose_instruction_i,
     .vmodel_permute_valid_i,.vmodel_permute_instruction_i,.native_transpose_valid_o(native_t_valid),

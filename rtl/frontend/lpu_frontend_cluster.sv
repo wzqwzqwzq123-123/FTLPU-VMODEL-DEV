@@ -7,7 +7,7 @@ module lpu_frontend_cluster (
 	// MEM follows the separate {hemisphere,slice,bank} execution path in lpu_top.
 	input  logic [207:0]      mem_issue_valid_i,
 	output logic [207:0]      mem_issue_ready_o,
-	input  logic [208*47-1:0] mem_issue_instruction_i,
+	input  logic [lpu_pkg::MEM_BANK_COUNT*lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] mem_issue_instruction_i,
 	input  logic [3:0]        mxm_load_issue_valid_i,
 	output logic [3:0]        mxm_load_issue_ready_o,
 	input  logic [4*29-1:0]   mxm_load_issue_instruction_i,

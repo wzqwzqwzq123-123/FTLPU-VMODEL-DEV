@@ -1,39 +1,53 @@
 `timescale 1ns/1ps
 
-// Stateless conversion from the VMODEL 47-bit MEM issue packet to the native
-// 32-bit command accepted by the Phase 2A MEM hierarchy.  This adapter only
-// supports VMODEL MEM_READ and MEM_WRITE; unsupported commands fail closed.
+// Stateless conversion from the formal MEM machine code to the private
+// 32-bit Native control word. Legal but unimplemented operations fail closed.
 module lpu_mem_command_adapter (
   input  logic        issue_valid_i,
-  input  logic [46:0] issue_instruction_i,
+  input  logic [lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] issue_instruction_i,
   output logic        native_valid_o,
-  output logic [31:0] native_command_o,
-  output logic        command_fault_o
+  output logic [lpu_pkg::MEM_NATIVE_COMMAND_WIDTH-1:0] native_command_o,
+  output logic        command_fault_o,
+  output logic        command_unsupported_o
 );
-  localparam logic [2:0] VMODEL_MEM_READ  = 3'd0;
-  localparam logic [2:0] VMODEL_MEM_WRITE = 3'd1;
+  logic [2:0] opcode;
+  logic [5:0] stream;
+  logic [5:0] map_stream;
+  logic [lpu_pkg::MEM_ADDRESS_WIDTH-1:0] address;
+  logic preserve_stream;
+  logic instruction_legal;
+  logic instruction_implemented;
+
+  lpu_mem_instruction_decode u_decode (
+    .instruction_i(issue_instruction_i),
+    .opcode_o(opcode),
+    .stream_o(stream),
+    .map_stream_o(map_stream),
+    .address_o(address),
+    .preserve_stream_o(preserve_stream),
+    .legal_o(instruction_legal),
+    .implemented_o(instruction_implemented)
+  );
 
   always @* begin
     native_valid_o = 1'b0;
     native_command_o = '0;
     command_fault_o = 1'b0;
+    command_unsupported_o = 1'b0;
 
     if (issue_valid_i) begin
-      // VMODEL [46:31] is write_address.  Its required zero value for Read
-      // and Write is checked explicitly rather than silently discarded.
-      // VMODEL address[15] cannot fit the native 15-bit row field.
-      if ((issue_instruction_i[2:0] == VMODEL_MEM_READ ||
-           issue_instruction_i[2:0] == VMODEL_MEM_WRITE) &&
-          (issue_instruction_i[46:31] == '0) &&
-          !issue_instruction_i[30]) begin
+      if (instruction_legal && instruction_implemented) begin
         native_valid_o = 1'b1;
-        native_command_o[2:0] = issue_instruction_i[2:0];
-        native_command_o[8:3] = issue_instruction_i[8:3];
-        native_command_o[29:15] = issue_instruction_i[29:15];
-        // Native [14:9] is reserved and [31] is preserve.  VMODEL Read/Write
-        // have no equivalent preserve bit, so both are fixed to zero.
+        // Native keeps a narrower private control word. Formal map_stream is
+        // ignored for READ/WRITE exactly as in the CModel decode, while the
+        // bank-local row and WriteTap bit retain their architectural meaning.
+        native_command_o[2:0] = opcode;
+        native_command_o[8:3] = stream;
+        native_command_o[27:15] = address;
+        native_command_o[31] = preserve_stream;
       end else begin
         command_fault_o = 1'b1;
+        command_unsupported_o = instruction_legal && !instruction_implemented;
       end
     end
   end

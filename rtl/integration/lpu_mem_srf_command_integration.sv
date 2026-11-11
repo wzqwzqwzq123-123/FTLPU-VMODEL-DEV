@@ -16,10 +16,11 @@ module lpu_mem_srf_command_integration #(
   input  logic clk_i,
   input  logic rst_ni,
   input  logic [MEM_SLICES*2-1:0] vmodel_issue_valid_i,
-  input  logic [MEM_SLICES*2*47-1:0] vmodel_issue_instruction_i,
+  input  logic [MEM_SLICES*2*lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] vmodel_issue_instruction_i,
   output logic [MEM_SLICES*2-1:0] native_issue_valid_o,
   output logic [MEM_SLICES*2*32-1:0] native_issue_o,
   output logic [MEM_SLICES*2-1:0] command_fault_o,
+  output logic [MEM_SLICES*2-1:0] command_unsupported_o,
   input  logic [2*SUPERLANES*STREAMS-1:0] boundary_valid_i,
   input  logic [2*SUPERLANES*STREAMS*SEGMENT_BITS-1:0] boundary_data_i,
   output logic [2*SUPERLANES*STREAMS-1:0] boundary_valid_o,
@@ -44,10 +45,12 @@ module lpu_mem_srf_command_integration #(
     for (genvar bank = 0; bank < MEM_SLICES*2; bank = bank + 1) begin : gen_adapter
       lpu_mem_command_adapter u_adapter (
         .issue_valid_i(vmodel_issue_valid_i[bank]),
-        .issue_instruction_i(vmodel_issue_instruction_i[bank*47 +: 47]),
+        .issue_instruction_i(vmodel_issue_instruction_i[
+          bank*lpu_pkg::MEM_INSTRUCTION_WIDTH +: lpu_pkg::MEM_INSTRUCTION_WIDTH]),
         .native_valid_o(native_issue_valid_o[bank]),
         .native_command_o(native_issue_o[bank*32 +: 32]),
-        .command_fault_o(command_fault_o[bank])
+        .command_fault_o(command_fault_o[bank]),
+        .command_unsupported_o(command_unsupported_o[bank])
       );
     end
   endgenerate

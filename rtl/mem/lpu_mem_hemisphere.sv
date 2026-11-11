@@ -8,7 +8,7 @@ module lpu_mem_hemisphere #(
   input  logic run_i,
 
   input  logic [51:0] issue_valid_i,
-  input  logic [52*47-1:0] issue_instruction_i,
+  input  logic [52*lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] issue_instruction_i,
 
   // Boundary 0 is adjacent to VXM; boundary 13 is adjacent to SXM.
   input  logic [4*32-1:0] east_edge_valid_i,
@@ -68,7 +68,8 @@ module lpu_mem_hemisphere #(
         .clk_i,
         .rst_ni,
         .issue_valid_i(issue_valid_i[COLUMN_INDEX]),
-        .issue_instruction_i(issue_instruction_i[COLUMN_INDEX*47 +: 47]),
+        .issue_instruction_i(issue_instruction_i[
+          COLUMN_INDEX*lpu_pkg::MEM_INSTRUCTION_WIDTH +: lpu_pkg::MEM_INSTRUCTION_WIDTH]),
         .tile_rx_valid_i(column_rx_valid[COLUMN_INDEX*TILES*64 +: TILES*64]),
         .tile_rx_data_i(column_rx_data[COLUMN_INDEX*TILES*64*64 +: TILES*64*64]),
         .tile_rx_consume_o(rx_consume),

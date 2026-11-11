@@ -1,9 +1,10 @@
 module lpu_top #(
 	parameter integer ICU_QUEUE_DEPTH = 16,
-	parameter integer MEM_DEPTH_ROWS = 65536,
+	parameter integer MEM_DEPTH_ROWS = lpu_pkg::SRAM_DEPTH_ROWS,
 	parameter integer ACTIVE_MEM_COLUMNS = 52,
 	parameter integer MXM_ACCUMULATOR_BLOCK_COUNT = lpu_pkg::MXM_ACCUMULATOR_BLOCK_COUNT,
 	parameter bit USE_SRAM_MACRO = 1'b0,
+	parameter bit USE_NATIVE_MEM = 1'b1,
 	parameter bit ENABLE_DISTRIBUTED_PROGRAM_FRONTEND = 1'b0,
 	parameter integer PROGRAM_COMMAND_DEPTH = 32,
 	parameter integer PROGRAM_DMA_DATA_WIDTH = 256,
@@ -11,7 +12,7 @@ module lpu_top #(
 	parameter integer PROGRAM_MXM_IMEM_DEPTH = 65536,
 	parameter integer PROGRAM_ACTIVE_CONTEXTS = 4,
 	parameter bit ENABLE_QCTL = 1'b0,
-	parameter integer QCTL_QUEUE_COUNT = 116,
+	parameter integer QCTL_QUEUE_COUNT = 220,
 	parameter integer PROGRAM_COMMAND_ADDRESS_WIDTH = PROGRAM_COMMAND_DEPTH <= 1 ? 1 : $clog2(PROGRAM_COMMAND_DEPTH)
 ) (
 	input logic clk_i,
@@ -108,22 +109,24 @@ module lpu_top #(
 	output logic [137:0] dispatch_valid_o,
 	output logic [138*416-1:0] dispatch_payload_o,
 	output logic [137:0] queue_fault_o,
-	output logic [2*52*4-1:0] mem_fault_o,
+	output logic [lpu_pkg::MEM_BANK_COUNT-1:0] mem_fault_o,
 	output logic [1:0] mxm_fault_o,
 	output logic [1:0] sxm_fault_o,
 	output logic vxm_fault_o,
 	output logic [1:0] stream_conflict_o,
 	output logic [63:0] cycle_o
 );
-	localparam integer MEM_QUEUE_COUNT = 104;
+	localparam integer LEGACY_MEM_QUEUE_COUNT = 104;
+	localparam integer MEM_BANK_COUNT = lpu_pkg::MEM_BANK_COUNT;
 
 	logic legacy_schedule_ready;
 	logic [137:0] legacy_dispatch_valid;
 	logic [138*416-1:0] legacy_dispatch_payload;
 	logic [137:0] legacy_queue_fault;
 	logic [63:0] legacy_cycle_q;
-	logic [103:0] external_mem_issue_valid;
-	logic [104*47-1:0] external_mem_issue_instruction;
+	logic [MEM_BANK_COUNT-1:0] external_mem_issue_valid;
+	logic [MEM_BANK_COUNT-1:0] external_mem_issue_ready;
+	logic [MEM_BANK_COUNT*lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] external_mem_issue_instruction;
 	logic [3:0] external_mxm_load_issue_valid;
 	logic [4*48-1:0] external_mxm_load_issue_instruction;
 	logic [3:0] external_mxm_dequant_issue_valid;
@@ -138,9 +141,9 @@ module lpu_top #(
 	logic [8*lpu_pkg::VXM_LOCAL_MAX_INSTRUCTION_WIDTH-1:0] external_vxm_local_issue_instruction;
 	logic external_vxm_global_issue_valid;
 	logic [lpu_pkg::VXM_GLOBAL_CONFIG_WIDTH-1:0] external_vxm_global_issue_instruction;
-	logic [103:0] local_mem_issue_valid;
-	logic [104*47-1:0] local_mem_issue_instruction;
-	logic [104*32-1:0] local_mem_issue_cycle;
+	logic [MEM_BANK_COUNT-1:0] local_mem_issue_valid;
+	logic [MEM_BANK_COUNT*lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] local_mem_issue_instruction;
+	logic [MEM_BANK_COUNT*32-1:0] local_mem_issue_cycle;
 	logic [3:0] local_mxm_load_issue_valid;
 	logic [4*29-1:0] local_mxm_load_issue_instruction;
 	logic [4*32-1:0] local_mxm_load_issue_cycle;
@@ -190,7 +193,7 @@ module lpu_top #(
 
 	// Adapt current architectural Queue numbers to FU-subsystem inputs.
 	always_comb begin
-		external_mem_issue_valid = legacy_dispatch_valid[0+:MEM_QUEUE_COUNT];
+		external_mem_issue_valid = '0;
 		external_mem_issue_instruction = '0;
 		external_mxm_load_issue_valid = '0;
 		external_mxm_load_issue_instruction = '0;
@@ -206,8 +209,16 @@ module lpu_top #(
 		external_vxm_local_issue_instruction = '0;
 		external_vxm_global_issue_valid = legacy_dispatch_valid[lpu_pkg::VXM_GLOBAL_QUEUE];
 		external_vxm_global_issue_instruction = legacy_dispatch_payload[lpu_pkg::VXM_GLOBAL_QUEUE*416+:lpu_pkg::VXM_GLOBAL_CONFIG_WIDTH];
-		for(integer mem_queue = 0; mem_queue < MEM_QUEUE_COUNT; mem_queue = mem_queue + 1)begin
-			external_mem_issue_instruction[mem_queue*47+:47] = legacy_dispatch_payload[mem_queue*416+:47];
+		// The old 104-Queue ICU namespace has one MEM Queue per Slice. Preserve
+		// it as a compatibility source by targeting Bank 0 of each Slice.
+		for(integer mem_queue = 0; mem_queue < LEGACY_MEM_QUEUE_COUNT; mem_queue = mem_queue + 1)begin
+			integer bank_queue;
+			bank_queue = (mem_queue / 52) * lpu_pkg::MEM_BANKS_PER_HEMISPHERE +
+				(mem_queue % 52) * lpu_pkg::MEM_BANKS_PER_SLICE;
+			external_mem_issue_valid[bank_queue] = legacy_dispatch_valid[mem_queue];
+			external_mem_issue_instruction[
+				bank_queue*lpu_pkg::MEM_INSTRUCTION_WIDTH+:lpu_pkg::MEM_INSTRUCTION_WIDTH] =
+				legacy_dispatch_payload[mem_queue*416+:lpu_pkg::MEM_INSTRUCTION_WIDTH];
 		end
 		for(integer vxm_queue = 0; vxm_queue < lpu_pkg::VXM_LOCAL_QUEUE_COUNT; vxm_queue = vxm_queue + 1)begin
 			external_vxm_local_issue_instruction[vxm_queue*lpu_pkg::VXM_LOCAL_MAX_INSTRUCTION_WIDTH+:lpu_pkg::VXM_LOCAL_MAX_INSTRUCTION_WIDTH] = legacy_dispatch_payload[(lpu_pkg::VXM_QUEUE_BASE+vxm_queue)*416+:lpu_pkg::VXM_LOCAL_MAX_INSTRUCTION_WIDTH];
@@ -234,9 +245,16 @@ module lpu_top #(
 	always_comb begin
 		program_dispatch_valid = '0;
 		program_dispatch_payload = '0;
-		program_dispatch_valid[0+:MEM_QUEUE_COUNT] = local_mem_issue_valid;
-		for(integer mem_queue = 0; mem_queue < MEM_QUEUE_COUNT; mem_queue = mem_queue + 1)begin
-			program_dispatch_payload[mem_queue*416+:47] = local_mem_issue_instruction[mem_queue*47+:47];
+		// Existing dispatch observation also represents Bank 0 only; all 208
+		// Bank issues remain visible on the dedicated local MEM signals.
+		for(integer mem_queue = 0; mem_queue < LEGACY_MEM_QUEUE_COUNT; mem_queue = mem_queue + 1)begin
+			integer bank_queue;
+			bank_queue = (mem_queue / 52) * lpu_pkg::MEM_BANKS_PER_HEMISPHERE +
+				(mem_queue % 52) * lpu_pkg::MEM_BANKS_PER_SLICE;
+			program_dispatch_valid[mem_queue] = local_mem_issue_valid[bank_queue];
+			program_dispatch_payload[
+				mem_queue*416+:lpu_pkg::MEM_INSTRUCTION_WIDTH] = local_mem_issue_instruction[
+				bank_queue*lpu_pkg::MEM_INSTRUCTION_WIDTH+:lpu_pkg::MEM_INSTRUCTION_WIDTH];
 		end
 		for(integer hemisphere = 0; hemisphere < 2; hemisphere = hemisphere + 1)begin
 			program_dispatch_valid[lpu_pkg::MXM_LOAD_QUEUE_BASE+hemisphere] = local_mxm_load_issue_valid[hemisphere*2];
@@ -327,7 +345,8 @@ module lpu_top #(
 		.MEM_IMEM_DEPTH(PROGRAM_MEM_IMEM_DEPTH), .MXM_IMEM_DEPTH(PROGRAM_MXM_IMEM_DEPTH),
 		.ACTIVE_CONTEXTS(PROGRAM_ACTIVE_CONTEXTS), .MEM_DEPTH_ROWS(MEM_DEPTH_ROWS),
 		.ACTIVE_MEM_COLUMNS(ACTIVE_MEM_COLUMNS), .MXM_ACCUMULATOR_BLOCK_COUNT(MXM_ACCUMULATOR_BLOCK_COUNT),
-		.USE_SRAM_MACRO(USE_SRAM_MACRO), .ENABLE_QCTL(ENABLE_DISTRIBUTED_PROGRAM_FRONTEND && ENABLE_QCTL),
+		.USE_SRAM_MACRO(USE_SRAM_MACRO), .USE_NATIVE_MEM(USE_NATIVE_MEM),
+		.ENABLE_QCTL(ENABLE_DISTRIBUTED_PROGRAM_FRONTEND && ENABLE_QCTL),
 		.QCTL_QUEUE_COUNT(QCTL_QUEUE_COUNT)
 	) u_fu_subsystems (
 		.clk_i, .rst_ni, .program_reset_i, .local_frontend_enable_i(ENABLE_DISTRIBUTED_PROGRAM_FRONTEND),
@@ -349,7 +368,9 @@ module lpu_top #(
 		.qctl_notify_valid_o, .qctl_notify_ready_i, .qctl_mem_packet_valid_o, .qctl_mem_packet_ordinal_o,
 		.qctl_mem_packet_retired_i, .qctl_queue_active_o, .qctl_wait_event_blocked_o, .qctl_wait_event_tag_o,
 		.qctl_primed_o, .qctl_done_o, .qctl_fault_o, .qctl_fault_code_o,
-		.external_mem_issue_valid_i(external_mem_issue_valid), .external_mem_issue_instruction_i(external_mem_issue_instruction),
+		.external_mem_issue_valid_i(external_mem_issue_valid),
+		.external_mem_issue_ready_o(external_mem_issue_ready),
+		.external_mem_issue_instruction_i(external_mem_issue_instruction),
 		.external_mxm_load_issue_valid_i(external_mxm_load_issue_valid), .external_mxm_load_issue_instruction_i(external_mxm_load_issue_instruction),
 		.external_mxm_dequant_issue_valid_i(external_mxm_dequant_issue_valid), .external_mxm_dequant_issue_instruction_i(external_mxm_dequant_issue_instruction),
 		.external_mxm_compute_issue_valid_i(external_mxm_compute_issue_valid), .external_mxm_compute_issue_instruction_i(external_mxm_compute_issue_instruction),

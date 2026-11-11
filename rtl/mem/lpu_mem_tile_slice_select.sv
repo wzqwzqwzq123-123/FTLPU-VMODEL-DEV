@@ -1,12 +1,12 @@
 module lpu_mem_tile_slice #(
-  parameter integer DEPTH_ROWS = 65536,
+  parameter integer DEPTH_ROWS = lpu_pkg::SRAM_DEPTH_ROWS,
   parameter integer LANES      = 8,
   parameter bit USE_SRAM_MACRO = 1'b0
 ) (
   input  logic clk_i,
   input  logic rst_ni,
   input  logic instruction_valid_i,
-  input  logic [46:0] instruction_i,
+  input  logic [lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] instruction_i,
   input  logic [63:0] rx_valid_i,
   input  logic [64*LANES*8-1:0] rx_data_i,
   output logic [63:0] rx_consume_o,

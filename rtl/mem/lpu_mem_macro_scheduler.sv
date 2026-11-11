@@ -27,7 +27,7 @@ module lpu_mem_macro_scheduler #(
 	// Look-ahead output is accepted directly by the FU-local Timed Queue.
 	output logic        issue_valid_o,
 	input  logic        issue_ready_i,
-	output logic [46:0] issue_instruction_o,
+	output logic [lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] issue_instruction_o,
 	output logic [31:0] issue_cycle_o,
 
 	// Production observability and terminal status.
@@ -159,15 +159,16 @@ module lpu_mem_macro_scheduler #(
 		end
 	end
 
-	// Current VMODEL MEM issue path omits the CModel Preserve bit.
-	function automatic logic [46:0] native_to_vmodel_mem(
+	// Decoder Context carries the formal MEM low word; restore the 64-bit
+	// transport container and replace only the affine bank-local row field.
+	function automatic logic [lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] context_to_mem_instruction(
 		input logic [31:0] native_instruction,
 		input logic [12:0] address
 	);
 		begin
-			native_to_vmodel_mem = '0;
-			native_to_vmodel_mem[14:0] = native_instruction[14:0];
-			native_to_vmodel_mem[27:15] = address;
+			context_to_mem_instruction = '0;
+			context_to_mem_instruction[31:0] = native_instruction;
+			context_to_mem_instruction[27:15] = address;
 		end
 	endfunction
 
@@ -226,9 +227,10 @@ module lpu_mem_macro_scheduler #(
 	// Runtime admission needs enough lead for Active RAM visibility, Select and Issue FIFO stages.
 	always_comb begin
 		ingress_min_start_cycle_w = {1'b0, schedule_cycle_i} + ISSUE_LOOKAHEAD + 1;
-		native_invalid_w = (ingress_instruction_q[30:28] != 3'd0) || ingress_instruction_q[31] ||
+		native_invalid_w = (ingress_instruction_q[30:28] != 3'd0) ||
 			!((ingress_instruction_q[2:0] == 3'd0) || (ingress_instruction_q[2:0] == 3'd1) ||
 			(ingress_instruction_q[2:0] == 3'd3) || (ingress_instruction_q[2:0] == 3'd4)) ||
+			(ingress_instruction_q[31] && (ingress_instruction_q[2:0] != 3'd1)) ||
 			(ingress_instruction_q[27:15] != ingress_address_q);
 		iteration_invalid_w = (ingress_inner_count_q == 0) || (ingress_inner_count_q > MAX_CONTEXT_COUNT) ||
 			(ingress_outer_count_q == 0) || (ingress_outer_count_q > MAX_CONTEXT_COUNT) ||
@@ -314,7 +316,7 @@ module lpu_mem_macro_scheduler #(
 	assign issue_valid_o = scheduler_active_w && selected_valid_w && (due_count_w == 1) &&
 		!missed_generation_w && !fault_q;
 	assign issue_instruction_o = selected_valid_w ?
-		native_to_vmodel_mem(active_instruction_q[selected_index_w], active_address_q[selected_index_w]) : '0;
+		context_to_mem_instruction(active_instruction_q[selected_index_w], active_address_q[selected_index_w]) : '0;
 	assign issue_cycle_o = selected_valid_w ? lookahead_cycle_w : '0;
 	assign timed_queue_blocked_w = issue_valid_o && !issue_ready_i;
 	assign ingress_capacity_deadline_w = run_i && ingress_valid_q && !free_slot_valid_w &&

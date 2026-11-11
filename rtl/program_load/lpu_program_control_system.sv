@@ -92,7 +92,7 @@ module lpu_program_control_system #(
 	logic descriptor_duplicate_w;
 	logic descriptor_fault_q;
 
-	logic [103:0] mem_target_seen_q;
+	logic [lpu_pkg::MEM_BANK_COUNT-1:0] mem_target_seen_q;
 	logic [3:0] mxm_load_target_seen_q;
 	logic [3:0] mxm_dequant_target_seen_q;
 	logic [3:0] mxm_compute_target_seen_q;
@@ -165,15 +165,16 @@ module lpu_program_control_system #(
 		command_target_valid_w = 1'b0;
 		case(command_write_target_kind_i)
 			PROGRAM_TARGET_MEM: begin
-				if(command_write_global_queue_id_i < 8'd104)begin
+				if(command_write_global_queue_id_i < lpu_pkg::MEM_BANK_COUNT)begin
 					command_target_valid_w = 1'b1;
-					if(command_write_global_queue_id_i < 8'd52)begin
+					if(command_write_global_queue_id_i < lpu_pkg::MEM_BANKS_PER_HEMISPHERE)begin
 						command_hemisphere_w = PROGRAM_HEMISPHERE_EAST;
 						command_local_queue_w = command_write_global_queue_id_i;
 					end
 					else begin
 						command_hemisphere_w = PROGRAM_HEMISPHERE_WEST;
-						command_local_queue_w = command_write_global_queue_id_i - 8'd52;
+						command_local_queue_w = command_write_global_queue_id_i -
+							lpu_pkg::MEM_BANKS_PER_HEMISPHERE;
 					end
 				end
 			end
