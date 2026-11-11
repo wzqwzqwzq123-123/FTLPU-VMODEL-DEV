@@ -48,6 +48,8 @@ module lpu_program_load_distributor #(
 	logic [16:0] head_imem_address;
 	logic head_last;
 	logic elastic_idle;
+	logic [2:0] head_target_kind_w;
+	logic vxm_target_w;
 
 	logic west_required_w;
 	logic east_required_w;
@@ -89,15 +91,20 @@ module lpu_program_load_distributor #(
 		.idle_o(elastic_idle)
 	);
 
-	assign west_required_w = (head_scope == PROGRAM_SCOPE_WEST) ||
-		(head_scope == PROGRAM_SCOPE_BOTH);
-	assign east_required_w = (head_scope == PROGRAM_SCOPE_EAST) ||
+	assign head_target_kind_w = head_destination[
+		PROGRAM_DESTINATION_KIND_MSB:PROGRAM_DESTINATION_KIND_LSB];
+	assign vxm_target_w = head_target_kind_w == PROGRAM_TARGET_VXM;
+	// The central VXM uses the East output as its canonical direct branch. BOTH
+	// never duplicates a VXM Program Load request into both Hemisphere chains.
+	assign west_required_w = !vxm_target_w && ((head_scope == PROGRAM_SCOPE_WEST) ||
+		(head_scope == PROGRAM_SCOPE_BOTH));
+	assign east_required_w = vxm_target_w || (head_scope == PROGRAM_SCOPE_EAST) ||
 		(head_scope == PROGRAM_SCOPE_BOTH);
 	assign scope_invalid_w = (head_scope != PROGRAM_SCOPE_EAST) &&
 		(head_scope != PROGRAM_SCOPE_WEST) && (head_scope != PROGRAM_SCOPE_BOTH);
-	assign scope_mismatch_w = ((head_scope == PROGRAM_SCOPE_EAST) &&
+	assign scope_mismatch_w = ((!vxm_target_w && (head_scope == PROGRAM_SCOPE_EAST)) &&
 		(head_destination[PROGRAM_DESTINATION_HEMISPHERE_BIT] != PROGRAM_HEMISPHERE_EAST)) ||
-		((head_scope == PROGRAM_SCOPE_WEST) &&
+		((!vxm_target_w && (head_scope == PROGRAM_SCOPE_WEST)) &&
 		 (head_destination[PROGRAM_DESTINATION_HEMISPHERE_BIT] != PROGRAM_HEMISPHERE_WEST));
 	assign route_invalid_w = head_valid && (scope_invalid_w || scope_mismatch_w);
 
