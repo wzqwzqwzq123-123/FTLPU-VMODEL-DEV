@@ -272,11 +272,11 @@ module lpu_top #(
 
 	generate
 		if(ENABLE_DISTRIBUTED_PROGRAM_FRONTEND)begin : gen_program_control
-			lpu_program_control_system #(
+			lpu_program_load_controller #(
 				.COMMAND_DEPTH(PROGRAM_COMMAND_DEPTH), .DMA_DATA_WIDTH(PROGRAM_DMA_DATA_WIDTH),
 				.MEM_IMEM_DEPTH(PROGRAM_MEM_IMEM_DEPTH), .MXM_IMEM_DEPTH(PROGRAM_MXM_IMEM_DEPTH),
-				.ACTIVE_CONTEXTS(PROGRAM_ACTIVE_CONTEXTS), .COMMAND_ADDRESS_WIDTH(PROGRAM_COMMAND_ADDRESS_WIDTH)
-			) u_program_control (
+				.COMMAND_ADDRESS_WIDTH(PROGRAM_COMMAND_ADDRESS_WIDTH)
+			) u_program_controller (
 				.clk_i, .rst_ni, .program_reset_i,
 				.command_write_valid_i(program_command_write_valid_i), .command_write_ready_o(program_command_write_ready_o),
 				.command_write_address_i(program_command_write_address_i), .command_write_opcode_i(program_command_write_opcode_i),

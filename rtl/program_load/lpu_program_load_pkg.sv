@@ -71,7 +71,7 @@ package lpu_program_load_pkg;
 		PROGRAM_LOADER_NEXT = 3'd3,
 		PROGRAM_LOADER_JUMP = 3'd4,
 		PROGRAM_LOADER_END = 3'd5
-	} lpu_program_loader_opcode_e;
+	} lpu_program_command_opcode_e;
 
 	typedef enum logic [PROGRAM_FAULT_CODE_WIDTH-1:0] {
 		PROGRAM_FAULT_NONE = 6'd0,

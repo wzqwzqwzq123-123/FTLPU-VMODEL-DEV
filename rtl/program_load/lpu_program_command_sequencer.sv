@@ -1,4 +1,4 @@
-module lpu_program_loader #(
+module lpu_program_command_sequencer #(
 	parameter integer COMMAND_DEPTH = 32,
 	parameter integer COMMAND_ADDRESS_WIDTH = COMMAND_DEPTH <= 1 ? 1 : $clog2(COMMAND_DEPTH)
 ) (

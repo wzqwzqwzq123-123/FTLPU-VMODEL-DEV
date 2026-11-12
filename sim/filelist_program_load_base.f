@@ -1,0 +1,14 @@
+rtl/queue/lpu_queue_fifo.sv
+rtl/program_load/lpu_program_load_pkg.sv
+rtl/program_load/lpu_program_command_sequencer.sv
+rtl/program_load/lpu_program_config_fifo.sv
+rtl/program_load/lpu_instruction_dma.sv
+rtl/program_load/lpu_program_reassembler.sv
+rtl/program_load/lpu_program_word_fifo.sv
+rtl/program_load/lpu_program_transfer_path.sv
+rtl/program_load/lpu_program_load_elastic_stage.sv
+rtl/program_load/lpu_program_load_distributor.sv
+rtl/program_load/lpu_program_distribution_ingress.sv
+sim/tb/program_load/lpu_program_config_fifo_tb.sv
+sim/tb/program_load/lpu_program_reassembler_tb.sv
+sim/tb/program_load/lpu_program_load_elastic_stage_tb.sv

@@ -1,9 +1,8 @@
-module lpu_program_control_system #(
+module lpu_program_load_controller #(
 	parameter integer COMMAND_DEPTH = 32,
 	parameter integer DMA_DATA_WIDTH = 256,
 	parameter integer MEM_IMEM_DEPTH = 131072,
 	parameter integer MXM_IMEM_DEPTH = 65536,
-	parameter integer ACTIVE_CONTEXTS = 4,
 	parameter integer COMMAND_ADDRESS_WIDTH = COMMAND_DEPTH <= 1 ? 1 : $clog2(COMMAND_DEPTH)
 ) (
 	input logic clk_i,
@@ -130,7 +129,6 @@ module lpu_program_control_system #(
 	logic loader_program_start;
 	logic loader_command_write_ready;
 	logic loader_start_ready;
-	logic loader_busy;
 	logic loader_error;
 	logic [5:0] loader_error_code;
 	logic cluster_start_ready;
@@ -144,6 +142,94 @@ module lpu_program_control_system #(
 	logic program_done_q;
 	logic west_commit_ready;
 	logic east_commit_ready;
+	logic internal_rst_ni;
+
+	// Command Sequencer transaction and control-command outputs.
+	logic command_transaction_valid;
+	logic command_transaction_ready;
+	logic [63:0] command_transaction_source_address;
+	logic [31:0] command_transaction_byte_count;
+	logic [1:0] command_transaction_scope;
+	logic [11:0] command_transaction_destination;
+	logic [1:0] command_transaction_format;
+	logic [16:0] command_transaction_imem_base_address;
+	logic command_transaction_image_first;
+	logic command_transaction_image_last;
+	logic [15:0] command_transaction_expected_word_count;
+	logic [7:0] command_transaction_dma_id;
+	logic command_commit_valid;
+	logic command_commit_ready;
+	logic [1:0] command_commit_scope;
+	logic [11:0] command_commit_destination;
+	logic command_done;
+	logic command_fault;
+	logic [5:0] command_fault_code;
+
+	// Program Transfer emits complete Program Words into Distribution ingress.
+	logic transfer_word_valid;
+	logic transfer_word_ready;
+	logic [127:0] transfer_word_data;
+	logic [3:0] transfer_word_strb;
+	logic [1:0] transfer_word_scope;
+	logic [11:0] transfer_word_destination;
+	logic [16:0] transfer_word_imem_address;
+	logic transfer_word_last;
+	logic transfer_idle;
+	logic transfer_fault;
+	logic [5:0] transfer_fault_code;
+
+	// PRIME descriptors are retained by the lifecycle controller until all
+	// Program Words and matching WRITE acknowledgements have retired.
+	logic prime_enqueue_valid;
+	logic prime_enqueue_ready;
+	logic [13:0] prime_enqueue_data;
+	logic prime_dequeue_valid;
+	logic prime_dequeue_ready;
+	logic [13:0] prime_dequeue_data;
+	logic [1:0] prime_dequeue_scope;
+	logic [11:0] prime_dequeue_destination;
+	logic [$clog2(32+1)-1:0] prime_fifo_level;
+	logic prime_select_w;
+
+	logic distribution_west_valid;
+	logic distribution_west_ready;
+	logic [PROGRAM_LOAD_CONTROL_WIDTH-1:0] distribution_west_control;
+	logic [127:0] distribution_west_data;
+	logic [3:0] distribution_west_strb;
+	logic [11:0] distribution_west_destination;
+	logic [16:0] distribution_west_imem_address;
+	logic distribution_west_last;
+	logic distribution_east_valid;
+	logic distribution_east_ready;
+	logic [PROGRAM_LOAD_CONTROL_WIDTH-1:0] distribution_east_control;
+	logic [127:0] distribution_east_data;
+	logic [3:0] distribution_east_strb;
+	logic [11:0] distribution_east_destination;
+	logic [16:0] distribution_east_imem_address;
+	logic distribution_east_last;
+	logic distribution_idle;
+	logic distribution_fault;
+	logic [5:0] distribution_fault_code;
+
+	logic west_commit_enqueue_ready;
+	logic west_commit_expected_valid;
+	logic west_commit_expected_pop;
+	logic [$clog2(16+1)-1:0] west_commit_level;
+	logic east_commit_enqueue_ready;
+	logic east_commit_expected_valid;
+	logic east_commit_expected_pop;
+	logic [$clog2(16+1)-1:0] east_commit_level;
+	logic west_bus_fire;
+	logic east_bus_fire;
+	logic west_commit_fire;
+	logic east_commit_fire;
+	logic west_commit_good_w;
+	logic east_commit_good_w;
+	logic commit_fault_w;
+	logic load_pipeline_idle_w;
+	logic instruction_load_done_q;
+	logic controller_fault_q;
+	logic [5:0] controller_fault_code_q;
 
 	initial begin
 		if(MEM_IMEM_DEPTH > 131072)begin
@@ -153,6 +239,8 @@ module lpu_program_control_system #(
 			$error("MXM subsystem iMEM exceeds the CMODEL capacity");
 		end
 	end
+
+	assign internal_rst_ni = rst_ni && !program_reset_i;
 
 	// Destination already uses the physical endpoint namespace: 0 is East and 1 is West.
 	// The loader scope remains two bits only so the lower-level BOTH path can be preserved.
@@ -264,15 +352,12 @@ module lpu_program_control_system #(
 		(loader_error ? loader_error_code :
 		(cluster_fault ? FRONTEND_FAULT_OFFSET + cluster_fault_code : PROGRAM_FAULT_NONE));
 
-	lpu_program_load_subsystem #(
+	lpu_program_command_sequencer #(
 		.COMMAND_DEPTH(COMMAND_DEPTH),
-		.DMA_DATA_WIDTH(DMA_DATA_WIDTH),
-		.IMEM_DEPTH(MEM_IMEM_DEPTH),
 		.COMMAND_ADDRESS_WIDTH(COMMAND_ADDRESS_WIDTH)
-	) u_program_loader (
+	) u_command_sequencer (
 		.clk_i,
-		.rst_ni,
-		.abort_i(program_reset_i),
+		.rst_ni(internal_rst_ni),
 		.command_write_valid_i,
 		.command_write_ready_o(loader_command_write_ready),
 		.command_write_address_i,
@@ -290,6 +375,49 @@ module lpu_program_control_system #(
 		.start_valid_i(load_start_valid_i && load_start_ready_o),
 		.start_ready_o(loader_start_ready),
 		.start_command_count_i(load_start_command_count_i),
+		.transaction_valid_o(command_transaction_valid),
+		.transaction_ready_i(command_transaction_ready),
+		.transaction_source_address_o(command_transaction_source_address),
+		.transaction_byte_count_o(command_transaction_byte_count),
+		.transaction_scope_o(command_transaction_scope),
+		.transaction_destination_o(command_transaction_destination),
+		.transaction_format_o(command_transaction_format),
+		.transaction_imem_base_address_o(command_transaction_imem_base_address),
+		.transaction_image_first_o(command_transaction_image_first),
+		.transaction_image_last_o(command_transaction_image_last),
+		.transaction_expected_word_count_o(command_transaction_expected_word_count),
+		.transaction_dma_id_o(command_transaction_dma_id),
+		.commit_valid_o(command_commit_valid),
+		.commit_ready_i(command_commit_ready),
+		.commit_scope_o(command_commit_scope),
+		.commit_destination_o(command_commit_destination),
+		.load_pipeline_idle_i(load_pipeline_idle_w),
+		.command_pc_o(),
+		.busy_o(),
+		.done_o(command_done),
+		.fault_o(command_fault),
+		.fault_code_o(command_fault_code)
+	);
+
+	lpu_program_transfer_path #(
+		.DMA_DATA_WIDTH(DMA_DATA_WIDTH),
+		.IMEM_DEPTH(MEM_IMEM_DEPTH)
+	) u_program_transfer (
+		.clk_i,
+		.rst_ni,
+		.clear_i(program_reset_i),
+		.transaction_valid_i(command_transaction_valid),
+		.transaction_ready_o(command_transaction_ready),
+		.transaction_source_address_i(command_transaction_source_address),
+		.transaction_byte_count_i(command_transaction_byte_count),
+		.transaction_scope_i(command_transaction_scope),
+		.transaction_destination_i(command_transaction_destination),
+		.transaction_format_i(command_transaction_format),
+		.transaction_imem_base_address_i(command_transaction_imem_base_address),
+		.transaction_image_first_i(command_transaction_image_first),
+		.transaction_image_last_i(command_transaction_image_last),
+		.transaction_expected_word_count_i(command_transaction_expected_word_count),
+		.transaction_dma_id_i(command_transaction_dma_id),
 		.dma_cmd_valid_o,
 		.dma_cmd_ready_i,
 		.dma_cmd_address_o,
@@ -302,38 +430,196 @@ module lpu_program_control_system #(
 		.dma_rsp_last_i,
 		.dma_rsp_id_i,
 		.dma_rsp_error_i,
-		.west_load_valid_o(west_load_valid),
-		.west_load_ready_i(west_load_ready),
-		.west_load_control_o(west_load_control),
-		.west_load_data_o(west_load_data),
-		.west_load_strb_o(west_load_strb),
-		.west_load_destination_o(west_load_destination),
-		.west_load_imem_address_o(west_load_imem_address),
-		.west_load_last_o(west_load_last),
-		.east_load_valid_o(east_load_valid),
-		.east_load_ready_i(east_load_ready),
-		.east_load_control_o(east_load_control),
-		.east_load_data_o(east_load_data),
-		.east_load_strb_o(east_load_strb),
-		.east_load_destination_o(east_load_destination),
-		.east_load_imem_address_o(east_load_imem_address),
-		.east_load_last_o(east_load_last),
-		.west_commit_valid_i(cluster_commit_valid[1]),
-		.west_commit_ready_o(west_commit_ready),
-		.west_commit_error_i(cluster_commit_error[1]),
-		.east_commit_valid_i(cluster_commit_valid[0]),
-		.east_commit_ready_o(east_commit_ready),
-		.east_commit_error_i(cluster_commit_error[0]),
-		.weight_load_done_i(start_pending_q && dependencies_ready_i),
-		.all_frontends_ready_i(cluster_frontends_ready),
-		.instruction_load_done_o(instruction_load_done),
-		.program_start_o(loader_program_start),
-		.busy_o(loader_busy),
+		.word_valid_o(transfer_word_valid),
+		.word_ready_i(transfer_word_ready),
+		.word_data_o(transfer_word_data),
+		.word_strb_o(transfer_word_strb),
+		.word_scope_o(transfer_word_scope),
+		.word_destination_o(transfer_word_destination),
+		.word_imem_address_o(transfer_word_imem_address),
+		.word_last_o(transfer_word_last),
+		.idle_o(transfer_idle),
 		.generated_word_count_o(),
-		.committed_word_count_o(),
-		.error_o(loader_error),
-		.error_code_o(loader_error_code)
+		.fault_o(transfer_fault),
+		.fault_code_o(transfer_fault_code)
 	);
+
+	assign prime_enqueue_valid = command_commit_valid && load_pipeline_idle_w;
+	assign command_commit_ready = prime_enqueue_valid && prime_enqueue_ready;
+	assign prime_enqueue_data = {command_commit_scope, command_commit_destination};
+
+	lpu_queue_fifo #(
+		.DATA_WIDTH(14),
+		.DEPTH(32)
+	) u_prime_fifo (
+		.clk_i,
+		.rst_ni(internal_rst_ni),
+		.enqueue_valid_i(prime_enqueue_valid),
+		.enqueue_ready_o(prime_enqueue_ready),
+		.enqueue_data_i(prime_enqueue_data),
+		.dequeue_valid_o(prime_dequeue_valid),
+		.dequeue_ready_i(prime_dequeue_ready),
+		.dequeue_data_o(prime_dequeue_data),
+		.level_o(prime_fifo_level)
+	);
+
+	assign {prime_dequeue_scope, prime_dequeue_destination} = prime_dequeue_data;
+	assign prime_select_w = instruction_load_done_q && prime_dequeue_valid;
+
+	lpu_program_distribution_ingress u_program_distribution_ingress (
+		.clk_i,
+		.rst_ni,
+		.clear_i(program_reset_i),
+		.word_valid_i(transfer_word_valid),
+		.word_ready_o(transfer_word_ready),
+		.word_data_i(transfer_word_data),
+		.word_strb_i(transfer_word_strb),
+		.word_scope_i(transfer_word_scope),
+		.word_destination_i(transfer_word_destination),
+		.word_imem_address_i(transfer_word_imem_address),
+		.word_last_i(transfer_word_last),
+		.prime_valid_i(prime_select_w),
+		.prime_ready_o(prime_dequeue_ready),
+		.prime_scope_i(prime_dequeue_scope),
+		.prime_destination_i(prime_dequeue_destination),
+		.west_valid_o(distribution_west_valid),
+		.west_ready_i(distribution_west_ready),
+		.west_control_o(distribution_west_control),
+		.west_data_o(distribution_west_data),
+		.west_strb_o(distribution_west_strb),
+		.west_destination_o(distribution_west_destination),
+		.west_imem_address_o(distribution_west_imem_address),
+		.west_last_o(distribution_west_last),
+		.east_valid_o(distribution_east_valid),
+		.east_ready_i(distribution_east_ready),
+		.east_control_o(distribution_east_control),
+		.east_data_o(distribution_east_data),
+		.east_strb_o(distribution_east_strb),
+		.east_destination_o(distribution_east_destination),
+		.east_imem_address_o(distribution_east_imem_address),
+		.east_last_o(distribution_east_last),
+		.idle_o(distribution_idle),
+		.fault_o(distribution_fault),
+		.fault_code_o(distribution_fault_code)
+	);
+
+	// Commit capacity is part of lifecycle control, so WRITE Records cannot
+	// leave the ingress unless the matching expected-response token is stored.
+	assign west_load_valid = distribution_west_valid &&
+		((distribution_west_control != PROGRAM_LOAD_WRITE) || west_commit_enqueue_ready);
+	assign distribution_west_ready = west_load_ready &&
+		((distribution_west_control != PROGRAM_LOAD_WRITE) || west_commit_enqueue_ready);
+	assign west_load_control = distribution_west_control;
+	assign west_load_data = distribution_west_data;
+	assign west_load_strb = distribution_west_strb;
+	assign west_load_destination = distribution_west_destination;
+	assign west_load_imem_address = distribution_west_imem_address;
+	assign west_load_last = distribution_west_last;
+	assign west_bus_fire = west_load_valid && west_load_ready;
+
+	assign east_load_valid = distribution_east_valid &&
+		((distribution_east_control != PROGRAM_LOAD_WRITE) || east_commit_enqueue_ready);
+	assign distribution_east_ready = east_load_ready &&
+		((distribution_east_control != PROGRAM_LOAD_WRITE) || east_commit_enqueue_ready);
+	assign east_load_control = distribution_east_control;
+	assign east_load_data = distribution_east_data;
+	assign east_load_strb = distribution_east_strb;
+	assign east_load_destination = distribution_east_destination;
+	assign east_load_imem_address = distribution_east_imem_address;
+	assign east_load_last = distribution_east_last;
+	assign east_bus_fire = east_load_valid && east_load_ready;
+
+	lpu_queue_fifo #(
+		.DATA_WIDTH(1),
+		.DEPTH(16)
+	) u_west_commit_fifo (
+		.clk_i,
+		.rst_ni(internal_rst_ni),
+		.enqueue_valid_i(west_bus_fire && (west_load_control == PROGRAM_LOAD_WRITE)),
+		.enqueue_ready_o(west_commit_enqueue_ready),
+		.enqueue_data_i(1'b1),
+		.dequeue_valid_o(west_commit_expected_valid),
+		.dequeue_ready_i(west_commit_expected_pop),
+		.dequeue_data_o(),
+		.level_o(west_commit_level)
+	);
+
+	lpu_queue_fifo #(
+		.DATA_WIDTH(1),
+		.DEPTH(16)
+	) u_east_commit_fifo (
+		.clk_i,
+		.rst_ni(internal_rst_ni),
+		.enqueue_valid_i(east_bus_fire && (east_load_control == PROGRAM_LOAD_WRITE)),
+		.enqueue_ready_o(east_commit_enqueue_ready),
+		.enqueue_data_i(1'b1),
+		.dequeue_valid_o(east_commit_expected_valid),
+		.dequeue_ready_i(east_commit_expected_pop),
+		.dequeue_data_o(),
+		.level_o(east_commit_level)
+	);
+
+	assign west_commit_ready = internal_rst_ni && !controller_fault_q;
+	assign east_commit_ready = internal_rst_ni && !controller_fault_q;
+	assign west_commit_fire = cluster_commit_valid[1] && west_commit_ready;
+	assign east_commit_fire = cluster_commit_valid[0] && east_commit_ready;
+	assign west_commit_good_w = west_commit_fire && west_commit_expected_valid &&
+		!cluster_commit_error[1];
+	assign east_commit_good_w = east_commit_fire && east_commit_expected_valid &&
+		!cluster_commit_error[0];
+	assign west_commit_expected_pop = west_commit_good_w;
+	assign east_commit_expected_pop = east_commit_good_w;
+	assign commit_fault_w = (west_commit_fire && !west_commit_good_w) ||
+		(east_commit_fire && !east_commit_good_w);
+
+	assign load_pipeline_idle_w = transfer_idle && distribution_idle &&
+		(west_commit_level == '0) && (east_commit_level == '0);
+	assign instruction_load_done = instruction_load_done_q;
+	assign loader_program_start = instruction_load_done_q &&
+		(start_pending_q && dependencies_ready_i) && cluster_frontends_ready && !loader_error;
+	assign loader_error = controller_fault_q || command_fault || transfer_fault ||
+		distribution_fault || commit_fault_w;
+	assign loader_error_code = controller_fault_q ? controller_fault_code_q :
+		(command_fault ? command_fault_code :
+		(transfer_fault ? transfer_fault_code :
+		(distribution_fault ? distribution_fault_code :
+		(commit_fault_w ? PROGRAM_FAULT_COMMIT : PROGRAM_FAULT_NONE))));
+
+	// Completion is reached only after END and every buffered WRITE/acknowledgement retires.
+	always_ff @(posedge clk_i or negedge internal_rst_ni) begin
+		if(!internal_rst_ni)begin
+			instruction_load_done_q <= 1'b0;
+		end
+		else if(command_done && load_pipeline_idle_w && !loader_error)begin
+			instruction_load_done_q <= 1'b1;
+		end
+	end
+
+	// Retain the first lifecycle fault so a later ready transition cannot hide it.
+	always_ff @(posedge clk_i or negedge internal_rst_ni) begin
+		if(!internal_rst_ni)begin
+			controller_fault_q <= 1'b0;
+			controller_fault_code_q <= PROGRAM_FAULT_NONE;
+		end
+		else if(!controller_fault_q)begin
+			if(command_fault)begin
+				controller_fault_q <= 1'b1;
+				controller_fault_code_q <= command_fault_code;
+			end
+			else if(transfer_fault)begin
+				controller_fault_q <= 1'b1;
+				controller_fault_code_q <= transfer_fault_code;
+			end
+			else if(distribution_fault)begin
+				controller_fault_q <= 1'b1;
+				controller_fault_code_q <= distribution_fault_code;
+			end
+			else if(commit_fault_w)begin
+				controller_fault_q <= 1'b1;
+				controller_fault_code_q <= PROGRAM_FAULT_COMMIT;
+			end
+		end
+	end
 
 	// Early START is sticky, matching CMODEL; dependencies must still be high on the acceptance cycle.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
