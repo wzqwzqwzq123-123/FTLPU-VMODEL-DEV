@@ -1,4 +1,4 @@
-module lpu_program_word_fifo #(
+module lpu_program_load_word_fifo #(
 	parameter integer DEPTH = 8
 ) (
 	input logic clk_i,

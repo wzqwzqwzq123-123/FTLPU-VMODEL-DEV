@@ -154,17 +154,18 @@ module lpu_top #(
 	logic [4*32-1:0] local_mxm_compute_issue_cycle;
 	logic [137:0] program_dispatch_valid;
 	logic [138*416-1:0] program_dispatch_payload;
-	logic [1:0] endpoint_load_valid;
-	logic [1:0] endpoint_load_ready;
-	logic [2*lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] endpoint_load_control;
-	logic [255:0] endpoint_load_data;
-	logic [7:0] endpoint_load_strb;
-	logic [23:0] endpoint_load_destination;
-	logic [33:0] endpoint_load_imem_address;
-	logic [1:0] endpoint_load_last;
-	logic [1:0] endpoint_commit_valid;
-	logic [1:0] endpoint_commit_ready;
-	logic [1:0] endpoint_commit_error;
+	logic program_distribute_valid;
+	logic program_distribute_ready;
+	logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] program_distribute_control;
+	logic [127:0] program_distribute_data;
+	logic [3:0] program_distribute_strb;
+	logic [1:0] program_distribute_scope;
+	logic [11:0] program_distribute_destination;
+	logic [16:0] program_distribute_imem_address;
+	logic program_distribute_last;
+	logic program_distribute_idle;
+	logic program_distribute_fault;
+	logic [5:0] program_distribute_fault_code;
 	logic endpoint_program_start;
 	logic endpoint_program_start_ready;
 	logic endpoint_started;
@@ -272,11 +273,11 @@ module lpu_top #(
 
 	generate
 		if(ENABLE_DISTRIBUTED_PROGRAM_FRONTEND)begin : gen_program_control
-			lpu_program_load_controller #(
+			lpu_program_load_system #(
 				.COMMAND_DEPTH(PROGRAM_COMMAND_DEPTH), .DMA_DATA_WIDTH(PROGRAM_DMA_DATA_WIDTH),
 				.MEM_IMEM_DEPTH(PROGRAM_MEM_IMEM_DEPTH), .MXM_IMEM_DEPTH(PROGRAM_MXM_IMEM_DEPTH),
 				.COMMAND_ADDRESS_WIDTH(PROGRAM_COMMAND_ADDRESS_WIDTH)
-			) u_program_controller (
+			) u_program_load_system (
 				.clk_i, .rst_ni, .program_reset_i,
 				.command_write_valid_i(program_command_write_valid_i), .command_write_ready_o(program_command_write_ready_o),
 				.command_write_address_i(program_command_write_address_i), .command_write_opcode_i(program_command_write_opcode_i),
@@ -296,13 +297,14 @@ module lpu_top #(
 				.program_start_request_i, .dependencies_ready_i(program_dependencies_ready_i), .program_start_ack_o,
 				.program_load_complete_o, .program_ready_o, .program_running_o, .program_done_o,
 				.program_fault_o, .program_fault_code_o, .schedule_cycle_o(program_schedule_cycle_o),
-				.endpoint_load_valid_o(endpoint_load_valid), .endpoint_load_ready_i(endpoint_load_ready),
-				.endpoint_load_control_o(endpoint_load_control), .endpoint_load_data_o(endpoint_load_data),
-				.endpoint_load_strb_o(endpoint_load_strb), .endpoint_load_destination_o(endpoint_load_destination),
-				.endpoint_load_imem_address_o(endpoint_load_imem_address),
-				.endpoint_load_last_o(endpoint_load_last),
-				.endpoint_commit_valid_i(endpoint_commit_valid), .endpoint_commit_ready_o(endpoint_commit_ready),
-				.endpoint_commit_error_i(endpoint_commit_error),
+				.distribute_valid_o(program_distribute_valid), .distribute_ready_i(program_distribute_ready),
+				.distribute_control_o(program_distribute_control), .distribute_data_o(program_distribute_data),
+				.distribute_strb_o(program_distribute_strb), .distribute_scope_o(program_distribute_scope),
+				.distribute_destination_o(program_distribute_destination),
+				.distribute_imem_address_o(program_distribute_imem_address),
+				.distribute_last_o(program_distribute_last), .distribute_idle_i(program_distribute_idle),
+				.distribute_fault_i(program_distribute_fault),
+				.distribute_fault_code_i(program_distribute_fault_code),
 				.endpoint_program_start_o(endpoint_program_start), .endpoint_program_start_ready_i(endpoint_program_start_ready),
 				.endpoint_started_i(endpoint_started), .endpoint_frontends_ready_i(endpoint_frontends_ready),
 				.endpoint_frontends_idle_i(endpoint_frontends_idle), .endpoint_fault_i(endpoint_fault),
@@ -325,14 +327,14 @@ module lpu_top #(
 			assign program_fault_o = 1'b0;
 			assign program_fault_code_o = '0;
 			assign program_schedule_cycle_o = '0;
-			assign endpoint_load_valid = '0;
-			assign endpoint_load_control = '0;
-			assign endpoint_load_data = '0;
-			assign endpoint_load_strb = '0;
-			assign endpoint_load_destination = '0;
-			assign endpoint_load_imem_address = '0;
-			assign endpoint_load_last = '0;
-			assign endpoint_commit_ready = '0;
+			assign program_distribute_valid = 1'b0;
+			assign program_distribute_control = '0;
+			assign program_distribute_data = '0;
+			assign program_distribute_strb = '0;
+			assign program_distribute_scope = '0;
+			assign program_distribute_destination = '0;
+			assign program_distribute_imem_address = '0;
+			assign program_distribute_last = 1'b0;
 			assign endpoint_program_start = 1'b0;
 		end
 	endgenerate
@@ -347,13 +349,18 @@ module lpu_top #(
 		.QCTL_QUEUE_COUNT(QCTL_QUEUE_COUNT)
 	) u_fu_subsystems (
 		.clk_i, .rst_ni, .program_reset_i, .local_frontend_enable_i(ENABLE_DISTRIBUTED_PROGRAM_FRONTEND),
-		.external_run_i(run_i), .endpoint_load_valid_i(endpoint_load_valid), .endpoint_load_ready_o(endpoint_load_ready),
-		.endpoint_load_control_i(endpoint_load_control), .endpoint_load_data_i(endpoint_load_data),
-		.endpoint_load_strb_i(endpoint_load_strb), .endpoint_load_destination_i(endpoint_load_destination),
-		.endpoint_load_imem_address_i(endpoint_load_imem_address),
-		.endpoint_load_last_i(endpoint_load_last),
-		.endpoint_commit_valid_o(endpoint_commit_valid), .endpoint_commit_ready_i(endpoint_commit_ready),
-		.endpoint_commit_error_o(endpoint_commit_error),
+		.external_run_i(run_i), .program_distribute_valid_i(program_distribute_valid),
+		.program_distribute_ready_o(program_distribute_ready),
+		.program_distribute_control_i(program_distribute_control),
+		.program_distribute_data_i(program_distribute_data),
+		.program_distribute_strb_i(program_distribute_strb),
+		.program_distribute_scope_i(program_distribute_scope),
+		.program_distribute_destination_i(program_distribute_destination),
+		.program_distribute_imem_address_i(program_distribute_imem_address),
+		.program_distribute_last_i(program_distribute_last),
+		.program_distribute_idle_o(program_distribute_idle),
+		.program_distribute_fault_o(program_distribute_fault),
+		.program_distribute_fault_code_o(program_distribute_fault_code),
 		.program_start_i(endpoint_program_start), .program_start_ready_o(endpoint_program_start_ready),
 		.started_o(endpoint_started), .all_frontends_ready_o(endpoint_frontends_ready),
 		.all_frontends_idle_o(endpoint_frontends_idle), .schedule_cycle_o(endpoint_schedule_cycle),

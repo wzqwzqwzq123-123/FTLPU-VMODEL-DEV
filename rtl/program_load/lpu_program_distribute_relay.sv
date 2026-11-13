@@ -1,4 +1,4 @@
-module lpu_program_load_relay #(
+module lpu_program_distribute_relay #(
 	parameter integer BUFFER_DEPTH = 2,
 	parameter integer MEM_SLICES_PER_HEMISPHERE = 52,
 	parameter integer MEM_SLICES_PER_GROUP = 4,

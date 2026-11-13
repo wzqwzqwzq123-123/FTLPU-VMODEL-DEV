@@ -1,4 +1,4 @@
-module lpu_program_load_relay_chain #(
+module lpu_program_distribute_relay_chain #(
 	parameter integer BUFFER_DEPTH = 2,
 	parameter integer HEMISPHERE_ID = lpu_program_load_pkg::PROGRAM_HEMISPHERE_EAST,
 	parameter integer MEM_SLICES_PER_HEMISPHERE = 52,
@@ -148,7 +148,7 @@ module lpu_program_load_relay_chain #(
 				assign relay_input_last[relay_gen] = relay_forward_last[relay_gen-1];
 			end
 
-			lpu_program_load_relay #(
+		lpu_program_distribute_relay #(
 				.BUFFER_DEPTH(BUFFER_DEPTH),
 				.MEM_SLICES_PER_HEMISPHERE(MEM_SLICES_PER_HEMISPHERE),
 				.MEM_SLICES_PER_GROUP(MEM_SLICES_PER_GROUP),

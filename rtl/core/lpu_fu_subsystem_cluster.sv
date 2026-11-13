@@ -19,17 +19,18 @@ module lpu_fu_subsystem_cluster #(
 	input logic local_frontend_enable_i,
 	input logic external_run_i,
 
-	input logic [1:0] endpoint_load_valid_i,
-	output logic [1:0] endpoint_load_ready_o,
-	input logic [2*lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] endpoint_load_control_i,
-	input logic [255:0] endpoint_load_data_i,
-	input logic [7:0] endpoint_load_strb_i,
-	input logic [23:0] endpoint_load_destination_i,
-	input logic [33:0] endpoint_load_imem_address_i,
-	input logic [1:0] endpoint_load_last_i,
-	output logic [1:0] endpoint_commit_valid_o,
-	input logic [1:0] endpoint_commit_ready_i,
-	output logic [1:0] endpoint_commit_error_o,
+	input logic program_distribute_valid_i,
+	output logic program_distribute_ready_o,
+	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] program_distribute_control_i,
+	input logic [127:0] program_distribute_data_i,
+	input logic [3:0] program_distribute_strb_i,
+	input logic [1:0] program_distribute_scope_i,
+	input logic [11:0] program_distribute_destination_i,
+	input logic [16:0] program_distribute_imem_address_i,
+	input logic program_distribute_last_i,
+	output logic program_distribute_idle_o,
+	output logic program_distribute_fault_o,
+	output logic [5:0] program_distribute_fault_code_o,
 
 	input logic program_start_i,
 	output logic program_start_ready_o,
@@ -185,8 +186,7 @@ module lpu_fu_subsystem_cluster #(
 	assign started_o = started_q;
 	assign schedule_cycle_o = schedule_cycle_q;
 	assign all_frontends_ready_o = (&mem_frontends_ready) && (&mxm_frontends_ready) &&
-		program_distribution_idle && (!ENABLE_QCTL || qctl_all_primed) &&
-		!(|endpoint_commit_valid_o) && !frontend_fault_o;
+		program_distribution_idle && (!ENABLE_QCTL || qctl_all_primed) && !frontend_fault_o;
 	assign all_frontends_idle_o = (&mem_frontends_idle) && (&mxm_frontends_idle) &&
 		program_distribution_idle;
 	assign program_start_ready_o = local_frontend_enable_i && all_frontends_ready_o && !started_q;
@@ -266,21 +266,23 @@ module lpu_fu_subsystem_cluster #(
 		end
 	endgenerate
 
-	lpu_program_distribution_network u_program_distribution_network (
+	assign program_distribute_idle_o = program_distribution_idle;
+	assign program_distribute_fault_o = program_distribution_fault;
+	assign program_distribute_fault_code_o = program_distribution_fault_code;
+
+	lpu_program_distribute_system u_program_distribute_system (
 		.clk_i,
 		.rst_ni,
 		.program_reset_i,
-		.endpoint_load_valid_i,
-		.endpoint_load_ready_o,
-		.endpoint_load_control_i,
-		.endpoint_load_data_i,
-		.endpoint_load_strb_i,
-		.endpoint_load_destination_i,
-		.endpoint_load_imem_address_i,
-		.endpoint_load_last_i,
-		.endpoint_commit_valid_o,
-		.endpoint_commit_ready_i,
-		.endpoint_commit_error_o,
+		.distribute_valid_i(program_distribute_valid_i),
+		.distribute_ready_o(program_distribute_ready_o),
+		.distribute_control_i(program_distribute_control_i),
+		.distribute_data_i(program_distribute_data_i),
+		.distribute_strb_i(program_distribute_strb_i),
+		.distribute_scope_i(program_distribute_scope_i),
+		.distribute_destination_i(program_distribute_destination_i),
+		.distribute_imem_address_i(program_distribute_imem_address_i),
+		.distribute_last_i(program_distribute_last_i),
 		.mem_program_valid_o(mem_program_valid),
 		.mem_program_ready_i(mem_program_ready),
 		.mem_program_control_o(mem_program_control),

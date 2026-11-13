@@ -1,4 +1,4 @@
-module lpu_program_load_elastic_stage #(
+module lpu_program_distribute_elastic_stage #(
 	parameter integer DEPTH = 2
 ) (
 	input logic clk_i,

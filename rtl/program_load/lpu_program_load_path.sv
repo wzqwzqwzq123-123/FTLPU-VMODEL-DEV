@@ -1,7 +1,7 @@
 // Program Transfer accepts one command-sequencer transaction atomically, receives
 // the corresponding DMA response stream, rebuilds Program Words and buffers them
 // until Program Distribution is ready.
-module lpu_program_transfer_path #(
+module lpu_program_load_path #(
 	parameter integer DMA_DATA_WIDTH = 256,
 	parameter integer CONFIG_FIFO_DEPTH = 16,
 	parameter integer DMA_OUTSTANDING_DEPTH = 16,
@@ -106,7 +106,7 @@ module lpu_program_transfer_path #(
 	assign dma_command_valid = transaction_valid_i && config_enqueue_ready;
 	assign config_enqueue_valid = transaction_valid_i && dma_command_ready;
 
-	lpu_program_config_fifo #(
+	lpu_program_load_config_fifo #(
 		.DEPTH(CONFIG_FIFO_DEPTH)
 	) u_config_fifo (
 		.clk_i,
@@ -178,7 +178,7 @@ module lpu_program_transfer_path #(
 		.fault_code_o(dma_fault_code)
 	);
 
-	lpu_program_reassembler #(
+	lpu_program_load_reassembler #(
 		.DMA_DATA_WIDTH(DMA_DATA_WIDTH),
 		.BUFFER_BYTES(REASSEMBLY_BUFFER_BYTES),
 		.IMEM_DEPTH(IMEM_DEPTH)
@@ -218,7 +218,7 @@ module lpu_program_transfer_path #(
 		.fault_code_o(reassembler_fault_code)
 	);
 
-	lpu_program_word_fifo #(
+	lpu_program_load_word_fifo #(
 		.DEPTH(WORD_FIFO_DEPTH)
 	) u_word_fifo (
 		.clk_i,

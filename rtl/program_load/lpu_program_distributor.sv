@@ -1,4 +1,4 @@
-module lpu_program_load_distributor #(
+module lpu_program_distributor #(
 	parameter integer ELASTIC_DEPTH = 2
 ) (
 	input logic clk_i,
@@ -64,7 +64,7 @@ module lpu_program_load_distributor #(
 	logic route_invalid_w;
 	logic fault_q;
 
-	lpu_program_load_elastic_stage #(
+	lpu_program_distribute_elastic_stage #(
 		.DEPTH(ELASTIC_DEPTH)
 	) u_input_elastic (
 		.clk_i,

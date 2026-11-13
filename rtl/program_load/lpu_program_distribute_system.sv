@@ -1,22 +1,19 @@
-// Program Distribution Network owns both physical seven-Relay chains, endpoint
-// routing, arbitration and one-cycle WRITE commit responses. It deliberately
-// adds no pipeline stage beyond the existing Relay buffers.
-module lpu_program_distribution_network (
+// Program Distribute System owns the input elastic stage, East/West expansion,
+// both physical seven-Relay chains and all FU-local iMEM routing.
+module lpu_program_distribute_system (
 	input logic clk_i,
 	input logic rst_ni,
 	input logic program_reset_i,
 
-	input logic [1:0] endpoint_load_valid_i,
-	output logic [1:0] endpoint_load_ready_o,
-	input logic [2*lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] endpoint_load_control_i,
-	input logic [255:0] endpoint_load_data_i,
-	input logic [7:0] endpoint_load_strb_i,
-	input logic [23:0] endpoint_load_destination_i,
-	input logic [33:0] endpoint_load_imem_address_i,
-	input logic [1:0] endpoint_load_last_i,
-	output logic [1:0] endpoint_commit_valid_o,
-	input logic [1:0] endpoint_commit_ready_i,
-	output logic [1:0] endpoint_commit_error_o,
+	input logic distribute_valid_i,
+	output logic distribute_ready_o,
+	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] distribute_control_i,
+	input logic [127:0] distribute_data_i,
+	input logic [3:0] distribute_strb_i,
+	input logic [1:0] distribute_scope_i,
+	input logic [11:0] distribute_destination_i,
+	input logic [16:0] distribute_imem_address_i,
+	input logic distribute_last_i,
 
 	output logic [1:0] mem_program_valid_o,
 	input logic [1:0] mem_program_ready_i,
@@ -83,7 +80,18 @@ module lpu_program_distribution_network (
 	logic [1:0] route_error_fire_w;
 	logic [1:0] completion_slot_ready_w;
 	logic [1:0] commit_valid_q;
-	logic [1:0] commit_error_q;
+	logic distributor_idle;
+	logic distributor_fault;
+	logic [5:0] distributor_fault_code;
+
+	logic [1:0] endpoint_load_valid;
+	logic [1:0] endpoint_load_ready;
+	logic [2*PROGRAM_LOAD_CONTROL_WIDTH-1:0] endpoint_load_control;
+	logic [255:0] endpoint_load_data;
+	logic [7:0] endpoint_load_strb;
+	logic [23:0] endpoint_load_destination;
+	logic [33:0] endpoint_load_imem_address;
+	logic [1:0] endpoint_load_last;
 
 	logic [1:0] mem_program_valid;
 	logic [1:0] mem_program_ready;
@@ -146,8 +154,6 @@ module lpu_program_distribution_network (
 	logic [1:0] relay_source_fire_w;
 
 	assign program_transport_rst_ni = rst_ni && !program_reset_i;
-	assign endpoint_commit_valid_o = commit_valid_q;
-	assign endpoint_commit_error_o = commit_error_q;
 	assign mem_program_ready = mem_program_ready_i;
 	assign mem_program_error = mem_program_error_i;
 	assign mxm_program_ready = mxm_program_ready_i;
@@ -179,21 +185,57 @@ module lpu_program_distribution_network (
 	assign vxm_program_data_o = vxm_program_data;
 	assign vxm_program_strb_o = vxm_program_strb;
 	assign vxm_program_last_o = vxm_program_last;
-	assign idle_o = &relay_chain_idle;
-	assign fault_o = route_fault_q || (|relay_chain_fault);
-	assign fault_code_o = fault_o ? FAULT_ROUTE : FAULT_NONE;
+	assign idle_o = distributor_idle && (&relay_chain_idle) && !(|commit_valid_q);
+	assign fault_o = distributor_fault || route_fault_q || (|relay_chain_fault);
+	assign fault_code_o = distributor_fault ? distributor_fault_code :
+		((route_fault_q || (|relay_chain_fault)) ? FAULT_ROUTE : FAULT_NONE);
+
+	// The Distributor contains the only input elastic stage. It expands one
+	// scoped Record into independently backpressured East and West transfers.
+	lpu_program_distributor u_distributor (
+		.clk_i,
+		.rst_ni(program_transport_rst_ni),
+		.input_valid_i(distribute_valid_i),
+		.input_ready_o(distribute_ready_o),
+		.input_control_i(distribute_control_i),
+		.input_data_i(distribute_data_i),
+		.input_strb_i(distribute_strb_i),
+		.input_scope_i(distribute_scope_i),
+		.input_destination_i(distribute_destination_i),
+		.input_imem_address_i(distribute_imem_address_i),
+		.input_last_i(distribute_last_i),
+		.west_valid_o(endpoint_load_valid[1]),
+		.west_ready_i(endpoint_load_ready[1]),
+		.west_control_o(endpoint_load_control[PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH]),
+		.west_data_o(endpoint_load_data[128+:128]),
+		.west_strb_o(endpoint_load_strb[4+:4]),
+		.west_destination_o(endpoint_load_destination[12+:12]),
+		.west_imem_address_o(endpoint_load_imem_address[17+:17]),
+		.west_last_o(endpoint_load_last[1]),
+		.east_valid_o(endpoint_load_valid[0]),
+		.east_ready_i(endpoint_load_ready[0]),
+		.east_control_o(endpoint_load_control[0+:PROGRAM_LOAD_CONTROL_WIDTH]),
+		.east_data_o(endpoint_load_data[0+:128]),
+		.east_strb_o(endpoint_load_strb[0+:4]),
+		.east_destination_o(endpoint_load_destination[0+:12]),
+		.east_imem_address_o(endpoint_load_imem_address[0+:17]),
+		.east_last_o(endpoint_load_last[0]),
+		.idle_o(distributor_idle),
+		.fault_o(distributor_fault),
+		.fault_code_o(distributor_fault_code)
+	);
 	generate
 		for(genvar destination_gen = 0; destination_gen < 2; destination_gen = destination_gen + 1)begin : gen_destination_fields
 			assign destination_hemisphere_match_w[destination_gen] =
-				endpoint_load_destination_i[destination_gen*PROGRAM_DESTINATION_WIDTH+
+				endpoint_load_destination[destination_gen*PROGRAM_DESTINATION_WIDTH+
 					PROGRAM_DESTINATION_HEMISPHERE_BIT] ==
 					(destination_gen == 0 ? PROGRAM_HEMISPHERE_EAST : PROGRAM_HEMISPHERE_WEST);
 			assign destination_target_kind_w[destination_gen*PROGRAM_TARGET_KIND_WIDTH+:
-				PROGRAM_TARGET_KIND_WIDTH] = endpoint_load_destination_i[
+				PROGRAM_TARGET_KIND_WIDTH] = endpoint_load_destination[
 				destination_gen*PROGRAM_DESTINATION_WIDTH+PROGRAM_DESTINATION_KIND_LSB+:
 				PROGRAM_TARGET_KIND_WIDTH];
 			assign destination_target_index_w[destination_gen*PROGRAM_TARGET_INDEX_WIDTH+:
-				PROGRAM_TARGET_INDEX_WIDTH] = endpoint_load_destination_i[
+				PROGRAM_TARGET_INDEX_WIDTH] = endpoint_load_destination[
 				destination_gen*PROGRAM_DESTINATION_WIDTH+PROGRAM_DESTINATION_INDEX_LSB+:
 				PROGRAM_TARGET_INDEX_WIDTH];
 		end
@@ -203,7 +245,7 @@ module lpu_program_distribution_network (
 	// filtered before this boundary and therefore never enter either chain.
 	generate
 		for(genvar chain_gen = 0; chain_gen < 2; chain_gen = chain_gen + 1)begin : gen_program_relay_chain
-			lpu_program_load_relay_chain #(
+			lpu_program_distribute_relay_chain #(
 				.HEMISPHERE_ID(chain_gen),
 				.MEM_SLICES_PER_HEMISPHERE(lpu_pkg::MEM_SLICES_PER_HEMISPHERE),
 				.MEM_SLICES_PER_GROUP(PROGRAM_RELAY_GROUP_SLICES),
@@ -216,14 +258,14 @@ module lpu_program_distribution_network (
 				.rst_ni(program_transport_rst_ni),
 				.input_valid_i(relay_chain_input_valid[chain_gen]),
 				.input_ready_o(relay_chain_input_ready[chain_gen]),
-				.input_control_i(endpoint_load_control_i[
+				.input_control_i(endpoint_load_control[
 					chain_gen*PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH]),
-				.input_data_i(endpoint_load_data_i[chain_gen*128+:128]),
-				.input_strb_i(endpoint_load_strb_i[chain_gen*4+:4]),
+				.input_data_i(endpoint_load_data[chain_gen*128+:128]),
+				.input_strb_i(endpoint_load_strb[chain_gen*4+:4]),
 				.input_scope_i(chain_gen == 0 ? PROGRAM_SCOPE_EAST : PROGRAM_SCOPE_WEST),
-				.input_destination_i(endpoint_load_destination_i[chain_gen*12+:12]),
-				.input_imem_address_i(endpoint_load_imem_address_i[chain_gen*17+:17]),
-				.input_last_i(endpoint_load_last_i[chain_gen]),
+				.input_destination_i(endpoint_load_destination[chain_gen*12+:12]),
+				.input_imem_address_i(endpoint_load_imem_address[chain_gen*17+:17]),
+				.input_last_i(endpoint_load_last[chain_gen]),
 				.mem_local_valid_o(relay_mem_valid[
 					chain_gen*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:
 					lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
@@ -267,7 +309,7 @@ module lpu_program_distribution_network (
 	// round-robin selector preserves the existing single Program port on each FU
 	// Subsystem while guaranteeing that no Relay stage can starve indefinitely.
 	always_comb begin
-		endpoint_load_ready_o = '0;
+		endpoint_load_ready = '0;
 		selected_ready_w = '0;
 		selected_valid_w = '0;
 		write_fire_w = '0;
@@ -315,8 +357,7 @@ module lpu_program_distribution_network (
 			logic selected_control;
 			logic selected_can_complete;
 
-			completion_slot_ready_w[hemisphere] = !commit_valid_q[hemisphere] ||
-				endpoint_commit_ready_i[hemisphere];
+			completion_slot_ready_w[hemisphere] = 1'b1;
 
 			for(integer local_bank = 0;
 				local_bank < lpu_pkg::MEM_BANKS_PER_HEMISPHERE;
@@ -369,26 +410,26 @@ module lpu_program_distribution_network (
 
 			if(!selected_valid_w[hemisphere])begin
 				selected_ready_w[hemisphere] =
-					(endpoint_load_control_i[hemisphere] != PROGRAM_LOAD_WRITE) ||
+					(endpoint_load_control[hemisphere] != PROGRAM_LOAD_WRITE) ||
 					completion_slot_ready_w[hemisphere];
 			end
 			else if(endpoint_kind == PROGRAM_TARGET_VXM)begin
 				// The shared VXM bypasses both Relay chains. The Subsystem boundary
 				// currently holds Ready low until its resident-config adapter exists.
 				selected_can_complete =
-					(endpoint_load_control_i[hemisphere] != PROGRAM_LOAD_WRITE) ||
+					(endpoint_load_control[hemisphere] != PROGRAM_LOAD_WRITE) ||
 					completion_slot_ready_w[hemisphere];
-				vxm_program_valid = endpoint_load_valid_i[hemisphere] && selected_can_complete;
-				vxm_program_control = endpoint_load_control_i[
+				vxm_program_valid = endpoint_load_valid[hemisphere] && selected_can_complete;
+				vxm_program_control = endpoint_load_control[
 					hemisphere*PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH];
-				vxm_program_destination = endpoint_load_destination_i[hemisphere*12+:12];
-				vxm_program_address = endpoint_load_imem_address_i[hemisphere*17+:17];
-				vxm_program_data = endpoint_load_data_i[hemisphere*128+:128];
-				vxm_program_strb = endpoint_load_strb_i[hemisphere*4+:4];
-				vxm_program_last = endpoint_load_last_i[hemisphere];
+				vxm_program_destination = endpoint_load_destination[hemisphere*12+:12];
+				vxm_program_address = endpoint_load_imem_address[hemisphere*17+:17];
+				vxm_program_data = endpoint_load_data[hemisphere*128+:128];
+				vxm_program_strb = endpoint_load_strb[hemisphere*4+:4];
+				vxm_program_last = endpoint_load_last[hemisphere];
 				selected_ready_w[hemisphere] = vxm_program_ready && selected_can_complete;
 				if(vxm_program_valid && vxm_program_ready &&
-					(endpoint_load_control_i[hemisphere] == PROGRAM_LOAD_WRITE))begin
+					(endpoint_load_control[hemisphere] == PROGRAM_LOAD_WRITE))begin
 					write_fire_w[hemisphere] = 1'b1;
 					write_error_w[hemisphere] = vxm_program_error;
 				end
@@ -397,13 +438,13 @@ module lpu_program_distribution_network (
 				// SXM requests enter the physical Relay chain and remain stalled at
 				// R6 until the Subsystem exposes a real local-iMEM receiver.
 				selected_ready_w[hemisphere] = relay_chain_input_ready[hemisphere];
-				relay_chain_input_valid[hemisphere] = endpoint_load_valid_i[hemisphere];
+				relay_chain_input_valid[hemisphere] = endpoint_load_valid[hemisphere];
 			end
-			endpoint_load_ready_o[hemisphere] = selected_ready_w[hemisphere];
+			endpoint_load_ready[hemisphere] = selected_ready_w[hemisphere];
 
-			if(endpoint_load_valid_i[hemisphere] && endpoint_load_ready_o[hemisphere] &&
+			if(endpoint_load_valid[hemisphere] && endpoint_load_ready[hemisphere] &&
 				!selected_valid_w[hemisphere])begin
-				if(endpoint_load_control_i[hemisphere] == PROGRAM_LOAD_WRITE)begin
+				if(endpoint_load_control[hemisphere] == PROGRAM_LOAD_WRITE)begin
 					write_fire_w[hemisphere] = 1'b1;
 					write_error_w[hemisphere] = 1'b1;
 				end
@@ -411,10 +452,10 @@ module lpu_program_distribution_network (
 					route_error_fire_w[hemisphere] = 1'b1;
 				end
 			end
-			if(endpoint_load_valid_i[hemisphere] && endpoint_load_ready_o[hemisphere] &&
-				(endpoint_load_control_i[hemisphere] == PROGRAM_LOAD_PRIME) &&
-				((endpoint_load_data_i[hemisphere*128+:128] != '0) ||
-				 (endpoint_load_strb_i[hemisphere*4+:4] != '0)))begin
+			if(endpoint_load_valid[hemisphere] && endpoint_load_ready[hemisphere] &&
+				(endpoint_load_control[hemisphere] == PROGRAM_LOAD_PRIME) &&
+				((endpoint_load_data[hemisphere*128+:128] != '0) ||
+				 (endpoint_load_strb[hemisphere*4+:4] != '0)))begin
 				route_error_fire_w[hemisphere] = 1'b1;
 			end
 
@@ -506,26 +547,19 @@ module lpu_program_distribution_network (
 		end
 	end
 
-	// One-cycle elastic commit response preserves the Program Loader write contract.
+	// Retain each accepted WRITE for one cycle so Distribution cannot report
+	// idle on the same edge that an FU-local iMEM accepts the final Record.
 	generate
 		for(genvar commit_gen = 0; commit_gen < 2; commit_gen = commit_gen + 1)begin : gen_commit
 			always_ff @(posedge clk_i or negedge rst_ni) begin
 				if(!rst_ni)begin
 					commit_valid_q[commit_gen] <= 1'b0;
-					commit_error_q[commit_gen] <= 1'b0;
 				end
 				else if(program_reset_i)begin
 					commit_valid_q[commit_gen] <= 1'b0;
-					commit_error_q[commit_gen] <= 1'b0;
 				end
 				else begin
-					if(commit_valid_q[commit_gen] && endpoint_commit_ready_i[commit_gen])begin
-						commit_valid_q[commit_gen] <= 1'b0;
-					end
-					if(write_fire_w[commit_gen])begin
-						commit_valid_q[commit_gen] <= 1'b1;
-						commit_error_q[commit_gen] <= write_error_w[commit_gen];
-					end
+					commit_valid_q[commit_gen] <= write_fire_w[commit_gen];
 				end
 			end
 		end

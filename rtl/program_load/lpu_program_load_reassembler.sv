@@ -1,4 +1,4 @@
-module lpu_program_reassembler #(
+module lpu_program_load_reassembler #(
 	parameter integer DMA_DATA_WIDTH = 256,
 	parameter integer BUFFER_BYTES = 64,
 	parameter integer IMEM_DEPTH = 65536

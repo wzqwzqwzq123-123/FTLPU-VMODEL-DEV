@@ -1,4 +1,4 @@
-module lpu_program_config_fifo #(
+module lpu_program_load_config_fifo #(
 	parameter integer DEPTH = 16
 ) (
 	input logic clk_i,
