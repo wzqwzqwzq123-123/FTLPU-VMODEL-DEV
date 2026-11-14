@@ -7,11 +7,11 @@ module lpu_instruction_dma #(
 	input logic clk_i,
 	input logic rst_ni,
 
-	input logic command_valid_i,
-	output logic command_ready_o,
-	input logic [63:0] command_address_i,
-	input logic [31:0] command_length_i,
-	input logic [DMA_ID_WIDTH-1:0] command_id_i,
+	input logic dma_cmd_valid_i,
+	output logic dma_cmd_ready_o,
+	input logic [63:0] dma_cmd_address_i,
+	input logic [31:0] dma_cmd_length_i,
+	input logic [DMA_ID_WIDTH-1:0] dma_cmd_id_i,
 
 	output logic dma_cmd_valid_o,
 	input logic dma_cmd_ready_i,
@@ -69,12 +69,12 @@ module lpu_instruction_dma #(
 	end
 
 	// Command acceptance reserves an ordered outstanding slot before the external DMA sees valid.
-	assign dma_cmd_valid_o = command_valid_i && outstanding_enqueue_ready && !fault_q;
-	assign dma_cmd_address_o = command_address_i;
-	assign dma_cmd_length_o = command_length_i;
-	assign dma_cmd_id_o = command_id_i;
-	assign command_ready_o = dma_cmd_ready_i && outstanding_enqueue_ready && !fault_q;
-	assign command_fire = command_valid_i && command_ready_o;
+	assign dma_cmd_valid_o = dma_cmd_valid_i && outstanding_enqueue_ready && !fault_q;
+	assign dma_cmd_address_o = dma_cmd_address_i;
+	assign dma_cmd_length_o = dma_cmd_length_i;
+	assign dma_cmd_id_o = dma_cmd_id_i;
+	assign dma_cmd_ready_o = dma_cmd_ready_i && outstanding_enqueue_ready && !fault_q;
+	assign command_fire = dma_cmd_valid_i && dma_cmd_ready_o;
 
 	assign response_enqueue_data = {
 		dma_rsp_error_i,
@@ -113,7 +113,7 @@ module lpu_instruction_dma #(
 		.rst_ni,
 		.enqueue_valid_i(command_fire),
 		.enqueue_ready_o(outstanding_enqueue_ready),
-		.enqueue_data_i(command_id_i),
+		.enqueue_data_i(dma_cmd_id_i),
 		.dequeue_valid_o(outstanding_dequeue_valid),
 		.dequeue_ready_i(outstanding_dequeue_ready),
 		.dequeue_data_o(outstanding_head_id),
