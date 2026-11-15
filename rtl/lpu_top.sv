@@ -27,35 +27,35 @@ module lpu_top #(
 
 	// Program Loader owns image descriptors and response reassembly after the external DMA.
 	input logic program_reset_i,
-	input logic program_command_write_valid_i,
-	output logic program_command_write_ready_o,
-	input logic [PROGRAM_COMMAND_ADDRESS_WIDTH-1:0] program_command_write_address_i,
-	input logic [2:0] program_command_write_opcode_i,
-	input logic [63:0] program_command_write_source_address_i,
-	input logic [31:0] program_command_write_byte_count_i,
-	input logic [11:0] program_command_write_destination_i,
-	input logic [1:0] program_command_write_format_i,
-	input logic [1:0] program_command_write_encoding_mode_i,
-	input logic [16:0] program_command_write_imem_base_address_i,
-	input logic program_command_write_image_first_i,
-	input logic program_command_write_image_last_i,
-	input logic [15:0] program_command_write_expected_word_count_i,
-	input logic [PROGRAM_COMMAND_ADDRESS_WIDTH-1:0] program_command_write_jump_address_i,
+	input logic program_cmd_write_valid_i,
+	output logic program_cmd_write_ready_o,
+	input logic [PROGRAM_COMMAND_ADDRESS_WIDTH-1:0] program_cmd_write_address_i,
+	input logic [2:0] program_cmd_write_opcode_i,
+	input logic [63:0] program_cmd_write_source_address_i,
+	input logic [31:0] program_cmd_write_byte_count_i,
+	input logic [11:0] program_cmd_write_destination_i,
+	input logic [1:0] program_cmd_write_format_i,
+	input logic [1:0] program_cmd_write_encoding_mode_i,
+	input logic [16:0] program_cmd_write_imem_base_address_i,
+	input logic program_cmd_write_image_first_i,
+	input logic program_cmd_write_image_last_i,
+	input logic [15:0] program_cmd_write_expected_word_count_i,
+	input logic [PROGRAM_COMMAND_ADDRESS_WIDTH-1:0] program_cmd_write_jump_address_i,
 	input logic program_load_start_valid_i,
 	output logic program_load_start_ready_o,
 	input logic [PROGRAM_COMMAND_ADDRESS_WIDTH:0] program_load_start_command_count_i,
-	output logic program_dma_cmd_valid_o,
-	input logic program_dma_cmd_ready_i,
-	output logic [63:0] program_dma_cmd_address_o,
-	output logic [31:0] program_dma_cmd_length_o,
-	output logic [7:0] program_dma_cmd_id_o,
-	input logic program_dma_rsp_valid_i,
-	output logic program_dma_rsp_ready_o,
-	input logic [PROGRAM_DMA_DATA_WIDTH-1:0] program_dma_rsp_data_i,
-	input logic [PROGRAM_DMA_DATA_WIDTH/8-1:0] program_dma_rsp_keep_i,
-	input logic program_dma_rsp_last_i,
-	input logic [7:0] program_dma_rsp_id_i,
-	input logic program_dma_rsp_error_i,
+	output logic program_ddr_read_req_valid_o,
+	input logic program_ddr_read_req_ready_i,
+	output logic [63:0] program_ddr_read_req_address_o,
+	output logic [31:0] program_ddr_read_req_length_o,
+	output logic [7:0] program_ddr_read_req_id_o,
+	input logic program_ddr_read_rsp_valid_i,
+	output logic program_ddr_read_rsp_ready_o,
+	input logic [PROGRAM_DMA_DATA_WIDTH-1:0] program_ddr_read_rsp_data_i,
+	input logic [PROGRAM_DMA_DATA_WIDTH/8-1:0] program_ddr_read_rsp_keep_i,
+	input logic program_ddr_read_rsp_last_i,
+	input logic [7:0] program_ddr_read_rsp_id_i,
+	input logic program_ddr_read_rsp_error_i,
 	input logic program_start_request_i,
 	input logic program_dependencies_ready_i,
 	output logic program_start_ack_o,
@@ -154,32 +154,32 @@ module lpu_top #(
 	logic [4*32-1:0] local_mxm_compute_issue_cycle;
 	logic [137:0] program_dispatch_valid;
 	logic [138*416-1:0] program_dispatch_payload;
-	logic program_distribute_valid;
-	logic program_distribute_ready;
-	logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] program_distribute_control;
-	logic [127:0] program_distribute_data;
-	logic [3:0] program_distribute_strb;
-	logic [1:0] program_distribute_scope;
-	logic [11:0] program_distribute_destination;
-	logic [16:0] program_distribute_imem_address;
-	logic program_distribute_last;
-	logic program_distribute_idle;
-	logic program_distribute_fault;
-	logic [5:0] program_distribute_fault_code;
-	logic endpoint_program_start;
-	logic endpoint_program_start_ready;
-	logic endpoint_started;
-	logic endpoint_frontends_ready;
-	logic endpoint_frontends_idle;
-	logic endpoint_fault;
-	logic [5:0] endpoint_fault_code;
-	logic [31:0] endpoint_schedule_cycle;
+	logic load_distribute_valid;
+	logic load_distribute_ready;
+	logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] load_distribute_control;
+	logic [127:0] load_distribute_data;
+	logic [3:0] load_distribute_strb;
+	logic [1:0] load_distribute_scope;
+	logic [11:0] load_distribute_destination;
+	logic [16:0] load_distribute_imem_address;
+	logic load_distribute_last;
+	logic load_distribute_idle;
+	logic load_distribute_fault;
+	logic [5:0] load_distribute_fault_code;
+	logic fu_cluster_program_start;
+	logic fu_cluster_program_start_ready;
+	logic fu_cluster_started;
+	logic fu_cluster_frontends_ready;
+	logic fu_cluster_frontends_idle;
+	logic fu_cluster_fault;
+	logic [5:0] fu_cluster_fault_code;
+	logic [31:0] fu_cluster_schedule_cycle;
 
 	assign schedule_ready_o = ENABLE_DISTRIBUTED_PROGRAM_FRONTEND ? 1'b0 : legacy_schedule_ready;
 	assign dispatch_valid_o = ENABLE_DISTRIBUTED_PROGRAM_FRONTEND ? program_dispatch_valid : legacy_dispatch_valid;
 	assign dispatch_payload_o = ENABLE_DISTRIBUTED_PROGRAM_FRONTEND ? program_dispatch_payload : legacy_dispatch_payload;
 	assign queue_fault_o = ENABLE_DISTRIBUTED_PROGRAM_FRONTEND ? '0 : legacy_queue_fault;
-	assign cycle_o = ENABLE_DISTRIBUTED_PROGRAM_FRONTEND ? {32'd0, endpoint_schedule_cycle} : legacy_cycle_q;
+	assign cycle_o = ENABLE_DISTRIBUTED_PROGRAM_FRONTEND ? {32'd0, fu_cluster_schedule_cycle} : legacy_cycle_q;
 
 	lpu_icu #(.QUEUE_DEPTH(ICU_QUEUE_DEPTH)) u_icu (
 		.clk_i, .rst_ni, .run_i(run_i && !ENABLE_DISTRIBUTED_PROGRAM_FRONTEND),
@@ -279,46 +279,46 @@ module lpu_top #(
 				.COMMAND_ADDRESS_WIDTH(PROGRAM_COMMAND_ADDRESS_WIDTH)
 			) u_program_load_system (
 				.clk_i, .rst_ni, .program_reset_i,
-				.command_write_valid_i(program_command_write_valid_i), .command_write_ready_o(program_command_write_ready_o),
-				.command_write_address_i(program_command_write_address_i), .command_write_opcode_i(program_command_write_opcode_i),
-				.command_write_source_address_i(program_command_write_source_address_i), .command_write_byte_count_i(program_command_write_byte_count_i),
-				.command_write_destination_i(program_command_write_destination_i),
-				.command_write_format_i(program_command_write_format_i), .command_write_encoding_mode_i(program_command_write_encoding_mode_i),
-				.command_write_imem_base_address_i(program_command_write_imem_base_address_i), .command_write_image_first_i(program_command_write_image_first_i),
-				.command_write_image_last_i(program_command_write_image_last_i), .command_write_expected_word_count_i(program_command_write_expected_word_count_i),
-				.command_write_jump_address_i(program_command_write_jump_address_i),
-				.load_start_valid_i(program_load_start_valid_i), .load_start_ready_o(program_load_start_ready_o),
-				.load_start_command_count_i(program_load_start_command_count_i), .dma_cmd_valid_o(program_dma_cmd_valid_o),
-				.dma_cmd_ready_i(program_dma_cmd_ready_i), .dma_cmd_address_o(program_dma_cmd_address_o),
-				.dma_cmd_length_o(program_dma_cmd_length_o), .dma_cmd_id_o(program_dma_cmd_id_o),
-				.dma_rsp_valid_i(program_dma_rsp_valid_i), .dma_rsp_ready_o(program_dma_rsp_ready_o),
-				.dma_rsp_data_i(program_dma_rsp_data_i), .dma_rsp_keep_i(program_dma_rsp_keep_i),
-				.dma_rsp_last_i(program_dma_rsp_last_i), .dma_rsp_id_i(program_dma_rsp_id_i), .dma_rsp_error_i(program_dma_rsp_error_i),
+				.program_cmd_write_valid_i(program_cmd_write_valid_i), .program_cmd_write_ready_o(program_cmd_write_ready_o),
+				.program_cmd_write_address_i(program_cmd_write_address_i), .program_cmd_write_opcode_i(program_cmd_write_opcode_i),
+				.program_cmd_write_source_address_i(program_cmd_write_source_address_i), .program_cmd_write_byte_count_i(program_cmd_write_byte_count_i),
+				.program_cmd_write_destination_i(program_cmd_write_destination_i),
+				.program_cmd_write_format_i(program_cmd_write_format_i), .program_cmd_write_encoding_mode_i(program_cmd_write_encoding_mode_i),
+				.program_cmd_write_imem_base_address_i(program_cmd_write_imem_base_address_i), .program_cmd_write_image_first_i(program_cmd_write_image_first_i),
+				.program_cmd_write_image_last_i(program_cmd_write_image_last_i), .program_cmd_write_expected_word_count_i(program_cmd_write_expected_word_count_i),
+				.program_cmd_write_jump_address_i(program_cmd_write_jump_address_i),
+				.program_load_start_valid_i(program_load_start_valid_i), .program_load_start_ready_o(program_load_start_ready_o),
+				.program_load_start_command_count_i(program_load_start_command_count_i), .ddr_read_req_valid_o(program_ddr_read_req_valid_o),
+				.ddr_read_req_ready_i(program_ddr_read_req_ready_i), .ddr_read_req_address_o(program_ddr_read_req_address_o),
+				.ddr_read_req_length_o(program_ddr_read_req_length_o), .ddr_read_req_id_o(program_ddr_read_req_id_o),
+				.ddr_read_rsp_valid_i(program_ddr_read_rsp_valid_i), .ddr_read_rsp_ready_o(program_ddr_read_rsp_ready_o),
+				.ddr_read_rsp_data_i(program_ddr_read_rsp_data_i), .ddr_read_rsp_keep_i(program_ddr_read_rsp_keep_i),
+				.ddr_read_rsp_last_i(program_ddr_read_rsp_last_i), .ddr_read_rsp_id_i(program_ddr_read_rsp_id_i), .ddr_read_rsp_error_i(program_ddr_read_rsp_error_i),
 				.program_start_request_i, .dependencies_ready_i(program_dependencies_ready_i), .program_start_ack_o,
 				.program_load_complete_o, .program_ready_o, .program_running_o, .program_done_o,
 				.program_fault_o, .program_fault_code_o, .schedule_cycle_o(program_schedule_cycle_o),
-				.distribute_valid_o(program_distribute_valid), .distribute_ready_i(program_distribute_ready),
-				.distribute_control_o(program_distribute_control), .distribute_data_o(program_distribute_data),
-				.distribute_strb_o(program_distribute_strb), .distribute_scope_o(program_distribute_scope),
-				.distribute_destination_o(program_distribute_destination),
-				.distribute_imem_address_o(program_distribute_imem_address),
-				.distribute_last_o(program_distribute_last), .distribute_idle_i(program_distribute_idle),
-				.distribute_fault_i(program_distribute_fault),
-				.distribute_fault_code_i(program_distribute_fault_code),
-				.endpoint_program_start_o(endpoint_program_start), .endpoint_program_start_ready_i(endpoint_program_start_ready),
-				.endpoint_started_i(endpoint_started), .endpoint_frontends_ready_i(endpoint_frontends_ready),
-				.endpoint_frontends_idle_i(endpoint_frontends_idle), .endpoint_fault_i(endpoint_fault),
-				.endpoint_fault_code_i(endpoint_fault_code), .endpoint_schedule_cycle_i(endpoint_schedule_cycle)
+				.load_distribute_valid_o(load_distribute_valid), .load_distribute_ready_i(load_distribute_ready),
+				.load_distribute_control_o(load_distribute_control), .load_distribute_data_o(load_distribute_data),
+				.load_distribute_strb_o(load_distribute_strb), .load_distribute_scope_o(load_distribute_scope),
+				.load_distribute_destination_o(load_distribute_destination),
+				.load_distribute_imem_address_o(load_distribute_imem_address),
+				.load_distribute_last_o(load_distribute_last), .load_distribute_idle_i(load_distribute_idle),
+				.load_distribute_fault_i(load_distribute_fault),
+				.load_distribute_fault_code_i(load_distribute_fault_code),
+				.fu_cluster_program_start_o(fu_cluster_program_start), .fu_cluster_program_start_ready_i(fu_cluster_program_start_ready),
+				.fu_cluster_started_i(fu_cluster_started), .fu_cluster_frontends_ready_i(fu_cluster_frontends_ready),
+				.fu_cluster_frontends_idle_i(fu_cluster_frontends_idle), .fu_cluster_fault_i(fu_cluster_fault),
+				.fu_cluster_fault_code_i(fu_cluster_fault_code), .fu_cluster_schedule_cycle_i(fu_cluster_schedule_cycle)
 			);
 		end
 		else begin : gen_no_program_control
-			assign program_command_write_ready_o = 1'b0;
+			assign program_cmd_write_ready_o = 1'b0;
 			assign program_load_start_ready_o = 1'b0;
-			assign program_dma_cmd_valid_o = 1'b0;
-			assign program_dma_cmd_address_o = '0;
-			assign program_dma_cmd_length_o = '0;
-			assign program_dma_cmd_id_o = '0;
-			assign program_dma_rsp_ready_o = 1'b0;
+			assign program_ddr_read_req_valid_o = 1'b0;
+			assign program_ddr_read_req_address_o = '0;
+			assign program_ddr_read_req_length_o = '0;
+			assign program_ddr_read_req_id_o = '0;
+			assign program_ddr_read_rsp_ready_o = 1'b0;
 			assign program_start_ack_o = 1'b0;
 			assign program_load_complete_o = 1'b0;
 			assign program_ready_o = 1'b0;
@@ -327,15 +327,15 @@ module lpu_top #(
 			assign program_fault_o = 1'b0;
 			assign program_fault_code_o = '0;
 			assign program_schedule_cycle_o = '0;
-			assign program_distribute_valid = 1'b0;
-			assign program_distribute_control = '0;
-			assign program_distribute_data = '0;
-			assign program_distribute_strb = '0;
-			assign program_distribute_scope = '0;
-			assign program_distribute_destination = '0;
-			assign program_distribute_imem_address = '0;
-			assign program_distribute_last = 1'b0;
-			assign endpoint_program_start = 1'b0;
+			assign load_distribute_valid = 1'b0;
+			assign load_distribute_control = '0;
+			assign load_distribute_data = '0;
+			assign load_distribute_strb = '0;
+			assign load_distribute_scope = '0;
+			assign load_distribute_destination = '0;
+			assign load_distribute_imem_address = '0;
+			assign load_distribute_last = 1'b0;
+			assign fu_cluster_program_start = 1'b0;
 		end
 	endgenerate
 
@@ -349,22 +349,22 @@ module lpu_top #(
 		.QCTL_QUEUE_COUNT(QCTL_QUEUE_COUNT)
 	) u_fu_subsystems (
 		.clk_i, .rst_ni, .program_reset_i, .local_frontend_enable_i(ENABLE_DISTRIBUTED_PROGRAM_FRONTEND),
-		.external_run_i(run_i), .program_distribute_valid_i(program_distribute_valid),
-		.program_distribute_ready_o(program_distribute_ready),
-		.program_distribute_control_i(program_distribute_control),
-		.program_distribute_data_i(program_distribute_data),
-		.program_distribute_strb_i(program_distribute_strb),
-		.program_distribute_scope_i(program_distribute_scope),
-		.program_distribute_destination_i(program_distribute_destination),
-		.program_distribute_imem_address_i(program_distribute_imem_address),
-		.program_distribute_last_i(program_distribute_last),
-		.program_distribute_idle_o(program_distribute_idle),
-		.program_distribute_fault_o(program_distribute_fault),
-		.program_distribute_fault_code_o(program_distribute_fault_code),
-		.program_start_i(endpoint_program_start), .program_start_ready_o(endpoint_program_start_ready),
-		.started_o(endpoint_started), .all_frontends_ready_o(endpoint_frontends_ready),
-		.all_frontends_idle_o(endpoint_frontends_idle), .schedule_cycle_o(endpoint_schedule_cycle),
-		.frontend_fault_o(endpoint_fault), .frontend_fault_code_o(endpoint_fault_code),
+		.external_run_i(run_i), .load_distribute_valid_i(load_distribute_valid),
+		.load_distribute_ready_o(load_distribute_ready),
+		.load_distribute_control_i(load_distribute_control),
+		.load_distribute_data_i(load_distribute_data),
+		.load_distribute_strb_i(load_distribute_strb),
+		.load_distribute_scope_i(load_distribute_scope),
+		.load_distribute_destination_i(load_distribute_destination),
+		.load_distribute_imem_address_i(load_distribute_imem_address),
+		.load_distribute_last_i(load_distribute_last),
+		.load_distribute_idle_o(load_distribute_idle),
+		.load_distribute_fault_o(load_distribute_fault),
+		.load_distribute_fault_code_o(load_distribute_fault_code),
+		.program_start_i(fu_cluster_program_start), .program_start_ready_o(fu_cluster_program_start_ready),
+		.started_o(fu_cluster_started), .all_frontends_ready_o(fu_cluster_frontends_ready),
+		.all_frontends_idle_o(fu_cluster_frontends_idle), .schedule_cycle_o(fu_cluster_schedule_cycle),
+		.frontend_fault_o(fu_cluster_fault), .frontend_fault_code_o(fu_cluster_fault_code),
 		.qctl_load_mode_i, .qctl_partition_valid_i, .qctl_partition_ready_o, .qctl_partition_queue_i,
 		.qctl_partition_base_i, .qctl_partition_count_i, .qctl_partition_generation_i,
 		.qctl_load_valid_i, .qctl_load_ready_o, .qctl_load_address_i, .qctl_load_data_i,

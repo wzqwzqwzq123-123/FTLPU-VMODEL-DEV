@@ -13,38 +13,38 @@ module lpu_program_load_system #(
 	input logic program_reset_i,
 
 	// A LOAD_IMEM command carries the ProgramImage descriptor. Other opcodes sequence the request.
-	input logic command_write_valid_i,
-	output logic command_write_ready_o,
-	input logic [COMMAND_ADDRESS_WIDTH-1:0] command_write_address_i,
-	input logic [2:0] command_write_opcode_i,
-	input logic [63:0] command_write_source_address_i,
-	input logic [31:0] command_write_byte_count_i,
-	input logic [11:0] command_write_destination_i,
-	input logic [1:0] command_write_format_i,
-	input logic [1:0] command_write_encoding_mode_i,
-	input logic [16:0] command_write_imem_base_address_i,
-	input logic command_write_image_first_i,
-	input logic command_write_image_last_i,
-	input logic [15:0] command_write_expected_word_count_i,
-	input logic [COMMAND_ADDRESS_WIDTH-1:0] command_write_jump_address_i,
+	input logic program_cmd_write_valid_i,
+	output logic program_cmd_write_ready_o,
+	input logic [COMMAND_ADDRESS_WIDTH-1:0] program_cmd_write_address_i,
+	input logic [2:0] program_cmd_write_opcode_i,
+	input logic [63:0] program_cmd_write_source_address_i,
+	input logic [31:0] program_cmd_write_byte_count_i,
+	input logic [11:0] program_cmd_write_destination_i,
+	input logic [1:0] program_cmd_write_format_i,
+	input logic [1:0] program_cmd_write_encoding_mode_i,
+	input logic [16:0] program_cmd_write_imem_base_address_i,
+	input logic program_cmd_write_image_first_i,
+	input logic program_cmd_write_image_last_i,
+	input logic [15:0] program_cmd_write_expected_word_count_i,
+	input logic [COMMAND_ADDRESS_WIDTH-1:0] program_cmd_write_jump_address_i,
 
-	input logic load_start_valid_i,
-	output logic load_start_ready_o,
-	input logic [COMMAND_ADDRESS_WIDTH:0] load_start_command_count_i,
+	input logic program_load_start_valid_i,
+	output logic program_load_start_ready_o,
+	input logic [COMMAND_ADDRESS_WIDTH:0] program_load_start_command_count_i,
 
 	// External DDR/C2C fabric boundary. The RTL owns request ordering and response reassembly.
-	output logic dma_cmd_valid_o,
-	input logic dma_cmd_ready_i,
-	output logic [63:0] dma_cmd_address_o,
-	output logic [31:0] dma_cmd_length_o,
-	output logic [7:0] dma_cmd_id_o,
-	input logic dma_rsp_valid_i,
-	output logic dma_rsp_ready_o,
-	input logic [DMA_DATA_WIDTH-1:0] dma_rsp_data_i,
-	input logic [DMA_DATA_WIDTH/8-1:0] dma_rsp_keep_i,
-	input logic dma_rsp_last_i,
-	input logic [7:0] dma_rsp_id_i,
-	input logic dma_rsp_error_i,
+	output logic ddr_read_req_valid_o,
+	input logic ddr_read_req_ready_i,
+	output logic [63:0] ddr_read_req_address_o,
+	output logic [31:0] ddr_read_req_length_o,
+	output logic [7:0] ddr_read_req_id_o,
+	input logic ddr_read_rsp_valid_i,
+	output logic ddr_read_rsp_ready_o,
+	input logic [DMA_DATA_WIDTH-1:0] ddr_read_rsp_data_i,
+	input logic [DMA_DATA_WIDTH/8-1:0] ddr_read_rsp_keep_i,
+	input logic ddr_read_rsp_last_i,
+	input logic [7:0] ddr_read_rsp_id_i,
+	input logic ddr_read_rsp_error_i,
 
 	input logic program_start_request_i,
 	input logic dependencies_ready_i,
@@ -58,26 +58,26 @@ module lpu_program_load_system #(
 	output logic [31:0] schedule_cycle_o,
 
 	// One normalized Record crosses the Load/Distribute architectural boundary.
-	output logic distribute_valid_o,
-	input logic distribute_ready_i,
-	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] distribute_control_o,
-	output logic [127:0] distribute_data_o,
-	output logic [3:0] distribute_strb_o,
-	output logic [1:0] distribute_scope_o,
-	output logic [11:0] distribute_destination_o,
-	output logic [16:0] distribute_imem_address_o,
-	output logic distribute_last_o,
-	input logic distribute_idle_i,
-	input logic distribute_fault_i,
-	input logic [5:0] distribute_fault_code_i,
-	output logic endpoint_program_start_o,
-	input logic endpoint_program_start_ready_i,
-	input logic endpoint_started_i,
-	input logic endpoint_frontends_ready_i,
-	input logic endpoint_frontends_idle_i,
-	input logic endpoint_fault_i,
-	input logic [5:0] endpoint_fault_code_i,
-	input logic [31:0] endpoint_schedule_cycle_i
+	output logic load_distribute_valid_o,
+	input logic load_distribute_ready_i,
+	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] load_distribute_control_o,
+	output logic [127:0] load_distribute_data_o,
+	output logic [3:0] load_distribute_strb_o,
+	output logic [1:0] load_distribute_scope_o,
+	output logic [11:0] load_distribute_destination_o,
+	output logic [16:0] load_distribute_imem_address_o,
+	output logic load_distribute_last_o,
+	input logic load_distribute_idle_i,
+	input logic load_distribute_fault_i,
+	input logic [5:0] load_distribute_fault_code_i,
+	output logic fu_cluster_program_start_o,
+	input logic fu_cluster_program_start_ready_i,
+	input logic fu_cluster_started_i,
+	input logic fu_cluster_frontends_ready_i,
+	input logic fu_cluster_frontends_idle_i,
+	input logic fu_cluster_fault_i,
+	input logic [5:0] fu_cluster_fault_code_i,
+	input logic [31:0] fu_cluster_schedule_cycle_i
 );
 	import lpu_program_load_pkg::*;
 
@@ -90,7 +90,7 @@ module lpu_program_load_system #(
 	logic [7:0] command_target_index_w;
 	logic [7:0] command_global_target_w;
 	logic command_target_valid_w;
-	logic command_write_fire;
+	logic program_cmd_write_fire;
 	logic descriptor_invalid_w;
 	logic descriptor_duplicate_w;
 	logic descriptor_fault_q;
@@ -102,7 +102,7 @@ module lpu_program_load_system #(
 
 	logic instruction_load_done;
 	logic loader_program_start;
-	logic loader_command_write_ready;
+	logic loader_program_cmd_write_ready;
 	logic loader_start_ready;
 	logic loader_error;
 	logic [5:0] loader_error_code;
@@ -118,38 +118,38 @@ module lpu_program_load_system #(
 	logic internal_rst_ni;
 
 	// Command Sequencer transaction and control-command outputs.
-	logic command_transaction_valid;
-	logic command_transaction_ready;
-	logic [63:0] command_transaction_source_address;
-	logic [31:0] command_transaction_byte_count;
-	logic [1:0] command_transaction_scope;
-	logic [11:0] command_transaction_destination;
-	logic [1:0] command_transaction_format;
-	logic [16:0] command_transaction_imem_base_address;
-	logic command_transaction_image_first;
-	logic command_transaction_image_last;
-	logic [15:0] command_transaction_expected_word_count;
-	logic [7:0] command_transaction_dma_id;
-	logic command_commit_valid;
-	logic command_commit_ready;
-	logic [1:0] command_commit_scope;
-	logic [11:0] command_commit_destination;
+	logic ctrl_load_txn_valid;
+	logic ctrl_load_txn_ready;
+	logic [63:0] ctrl_load_txn_source_address;
+	logic [31:0] ctrl_load_txn_byte_count;
+	logic [1:0] ctrl_load_txn_scope;
+	logic [11:0] ctrl_load_txn_destination;
+	logic [1:0] ctrl_load_txn_format;
+	logic [16:0] ctrl_load_txn_imem_base_address;
+	logic ctrl_load_txn_image_first;
+	logic ctrl_load_txn_image_last;
+	logic [15:0] ctrl_load_txn_expected_word_count;
+	logic [7:0] ctrl_load_txn_dma_id;
+	logic ctrl_prime_valid;
+	logic ctrl_prime_ready;
+	logic [1:0] ctrl_prime_scope;
+	logic [11:0] ctrl_prime_destination;
 	logic command_done;
 	logic command_fault;
 	logic [5:0] command_fault_code;
 
 	// Program Load Path emits complete Words for the unified Distribution boundary.
-	logic transfer_word_valid;
-	logic transfer_word_ready;
-	logic [127:0] transfer_word_data;
-	logic [3:0] transfer_word_strb;
-	logic [1:0] transfer_word_scope;
-	logic [11:0] transfer_word_destination;
-	logic [16:0] transfer_word_imem_address;
-	logic transfer_word_last;
-	logic transfer_idle;
-	logic transfer_fault;
-	logic [5:0] transfer_fault_code;
+	logic load_word_valid;
+	logic load_word_ready;
+	logic [127:0] load_word_data;
+	logic [3:0] load_word_strb;
+	logic [1:0] load_word_scope;
+	logic [11:0] load_word_destination;
+	logic [16:0] load_word_imem_address;
+	logic load_word_last;
+	logic load_path_idle;
+	logic load_path_fault;
+	logic [5:0] load_path_fault_code;
 
 	// PRIME descriptors are retained by the lifecycle controller until all
 	// Program Words and matching WRITE acknowledgements have retired.
@@ -183,11 +183,11 @@ module lpu_program_load_system #(
 	// Destination already uses the physical endpoint namespace: 0 is East and 1 is West.
 	// The loader scope remains two bits only so the lower-level BOTH path can be preserved.
 	always_comb begin
-		command_scope_w = command_write_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] ?
+		command_scope_w = program_cmd_write_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] ?
 			PROGRAM_SCOPE_WEST : PROGRAM_SCOPE_EAST;
-		command_target_kind_w = command_write_destination_i[
+		command_target_kind_w = program_cmd_write_destination_i[
 			PROGRAM_DESTINATION_KIND_MSB:PROGRAM_DESTINATION_KIND_LSB];
-		command_target_index_w = command_write_destination_i[
+		command_target_index_w = program_cmd_write_destination_i[
 			PROGRAM_DESTINATION_INDEX_MSB:PROGRAM_DESTINATION_INDEX_LSB];
 		command_global_target_w = command_target_index_w;
 		command_target_valid_w = 1'b0;
@@ -195,7 +195,7 @@ module lpu_program_load_system #(
 			PROGRAM_TARGET_MEM: begin
 				if(command_target_index_w < lpu_pkg::MEM_BANKS_PER_HEMISPHERE)begin
 					command_target_valid_w = 1'b1;
-					if(command_write_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] ==
+					if(program_cmd_write_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] ==
 						PROGRAM_HEMISPHERE_WEST)begin
 						command_global_target_w = command_target_index_w +
 							lpu_pkg::MEM_BANKS_PER_HEMISPHERE;
@@ -207,7 +207,7 @@ module lpu_program_load_system #(
 			PROGRAM_TARGET_MXM_COMPUTE: begin
 				if(command_target_index_w < 8'd2)begin
 					command_target_valid_w = 1'b1;
-					if(command_write_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] ==
+					if(program_cmd_write_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] ==
 						PROGRAM_HEMISPHERE_WEST)begin
 						command_global_target_w = command_target_index_w + 8'd2;
 					end
@@ -217,29 +217,29 @@ module lpu_program_load_system #(
 		endcase
 	end
 
-	assign command_write_ready_o = loader_command_write_ready && !load_request_active_q &&
+	assign program_cmd_write_ready_o = loader_program_cmd_write_ready && !load_request_active_q &&
 		!descriptor_fault_q;
-	assign command_write_fire = command_write_valid_i && command_write_ready_o;
-	assign descriptor_invalid_w = command_write_fire &&
-		(command_write_opcode_i == PROGRAM_LOADER_LOAD_IMEM) &&
-		(!command_target_valid_w || (command_write_encoding_mode_i != PROGRAM_ENCODING_MACRO) ||
-		 (command_write_byte_count_i == 0) ||
+	assign program_cmd_write_fire = program_cmd_write_valid_i && program_cmd_write_ready_o;
+	assign descriptor_invalid_w = program_cmd_write_fire &&
+		(program_cmd_write_opcode_i == PROGRAM_LOADER_LOAD_IMEM) &&
+		(!command_target_valid_w || (program_cmd_write_encoding_mode_i != PROGRAM_ENCODING_MACRO) ||
+		 (program_cmd_write_byte_count_i == 0) ||
 		 ((command_target_kind_w == PROGRAM_TARGET_MEM) &&
-		  ((command_write_format_i != PROGRAM_FORMAT_96) ||
-		   ((command_write_byte_count_i % 12) != 0) ||
-		   (command_write_expected_word_count_i != command_write_byte_count_i / 12) ||
-		   ({1'b0, command_write_imem_base_address_i} + command_write_expected_word_count_i > MEM_IMEM_DEPTH))) ||
+		  ((program_cmd_write_format_i != PROGRAM_FORMAT_96) ||
+		   ((program_cmd_write_byte_count_i % 12) != 0) ||
+		   (program_cmd_write_expected_word_count_i != program_cmd_write_byte_count_i / 12) ||
+		   ({1'b0, program_cmd_write_imem_base_address_i} + program_cmd_write_expected_word_count_i > MEM_IMEM_DEPTH))) ||
 		 (((command_target_kind_w == PROGRAM_TARGET_MXM_LOAD) ||
 		   (command_target_kind_w == PROGRAM_TARGET_MXM_DEQUANT) ||
 		   (command_target_kind_w == PROGRAM_TARGET_MXM_COMPUTE)) &&
-		  ((command_write_format_i != PROGRAM_FORMAT_128) ||
-		   ((command_write_byte_count_i % 16) != 0) ||
-		   (command_write_expected_word_count_i != command_write_byte_count_i / 16) ||
-		   ({1'b0, command_write_imem_base_address_i} + command_write_expected_word_count_i > MXM_IMEM_DEPTH))));
+		  ((program_cmd_write_format_i != PROGRAM_FORMAT_128) ||
+		   ((program_cmd_write_byte_count_i % 16) != 0) ||
+		   (program_cmd_write_expected_word_count_i != program_cmd_write_byte_count_i / 16) ||
+		   ({1'b0, program_cmd_write_imem_base_address_i} + program_cmd_write_expected_word_count_i > MXM_IMEM_DEPTH))));
 
 	always_comb begin
 		descriptor_duplicate_w = 1'b0;
-		if(command_write_fire && (command_write_opcode_i == PROGRAM_LOADER_LOAD_IMEM) && command_target_valid_w)begin
+		if(program_cmd_write_fire && (program_cmd_write_opcode_i == PROGRAM_LOADER_LOAD_IMEM) && command_target_valid_w)begin
 			case(command_target_kind_w)
 				PROGRAM_TARGET_MEM: descriptor_duplicate_w = mem_target_seen_q[command_global_target_w];
 				PROGRAM_TARGET_MXM_LOAD: descriptor_duplicate_w = mxm_load_target_seen_q[command_global_target_w[1:0]];
@@ -251,18 +251,18 @@ module lpu_program_load_system #(
 	end
 
 
-	assign endpoint_program_start_o = loader_program_start;
+	assign fu_cluster_program_start_o = loader_program_start;
 
-	assign cluster_start_ready = endpoint_program_start_ready_i;
-	assign cluster_started = endpoint_started_i;
-	assign cluster_frontends_ready = endpoint_frontends_ready_i;
-	assign cluster_frontends_idle = endpoint_frontends_idle_i;
-	assign cluster_fault = endpoint_fault_i;
-	assign cluster_fault_code = endpoint_fault_code_i;
-	assign schedule_cycle_o = endpoint_schedule_cycle_i;
+	assign cluster_start_ready = fu_cluster_program_start_ready_i;
+	assign cluster_started = fu_cluster_started_i;
+	assign cluster_frontends_ready = fu_cluster_frontends_ready_i;
+	assign cluster_frontends_idle = fu_cluster_frontends_idle_i;
+	assign cluster_fault = fu_cluster_fault_i;
+	assign cluster_fault_code = fu_cluster_fault_code_i;
+	assign schedule_cycle_o = fu_cluster_schedule_cycle_i;
 
 	assign program_start_ack_o = loader_program_start && cluster_start_ready;
-	assign load_start_ready_o = loader_start_ready && !load_request_active_q && !descriptor_fault_q;
+	assign program_load_start_ready_o = loader_start_ready && !load_request_active_q && !descriptor_fault_q;
 	assign program_load_complete_o = instruction_load_done;
 	assign program_ready_o = instruction_load_done && cluster_frontends_ready && !program_fault_o;
 	assign program_running_o = cluster_started && !program_done_q && !program_fault_o;
@@ -275,42 +275,42 @@ module lpu_program_load_system #(
 	lpu_program_load_controller #(
 		.COMMAND_DEPTH(COMMAND_DEPTH),
 		.COMMAND_ADDRESS_WIDTH(COMMAND_ADDRESS_WIDTH)
-	) u_command_sequencer (
+	) u_program_load_controller (
 		.clk_i,
 		.rst_ni(internal_rst_ni),
-		.command_write_valid_i,
-		.command_write_ready_o(loader_command_write_ready),
-		.command_write_address_i,
-		.command_write_opcode_i,
-		.command_write_source_address_i,
-		.command_write_byte_count_i,
-		.command_write_scope_i(command_scope_w),
-		.command_write_destination_i,
-		.command_write_format_i,
-		.command_write_imem_base_address_i,
-		.command_write_image_first_i,
-		.command_write_image_last_i,
-		.command_write_expected_word_count_i,
-		.command_write_jump_address_i,
-		.start_valid_i(load_start_valid_i && load_start_ready_o),
-		.start_ready_o(loader_start_ready),
-		.start_command_count_i(load_start_command_count_i),
-		.transaction_valid_o(command_transaction_valid),
-		.transaction_ready_i(command_transaction_ready),
-		.transaction_source_address_o(command_transaction_source_address),
-		.transaction_byte_count_o(command_transaction_byte_count),
-		.transaction_scope_o(command_transaction_scope),
-		.transaction_destination_o(command_transaction_destination),
-		.transaction_format_o(command_transaction_format),
-		.transaction_imem_base_address_o(command_transaction_imem_base_address),
-		.transaction_image_first_o(command_transaction_image_first),
-		.transaction_image_last_o(command_transaction_image_last),
-		.transaction_expected_word_count_o(command_transaction_expected_word_count),
-		.transaction_dma_id_o(command_transaction_dma_id),
-		.commit_valid_o(command_commit_valid),
-		.commit_ready_i(command_commit_ready),
-		.commit_scope_o(command_commit_scope),
-		.commit_destination_o(command_commit_destination),
+		.program_cmd_write_valid_i,
+		.program_cmd_write_ready_o(loader_program_cmd_write_ready),
+		.program_cmd_write_address_i,
+		.program_cmd_write_opcode_i,
+		.program_cmd_write_source_address_i,
+		.program_cmd_write_byte_count_i,
+		.program_cmd_write_scope_i(command_scope_w),
+		.program_cmd_write_destination_i,
+		.program_cmd_write_format_i,
+		.program_cmd_write_imem_base_address_i,
+		.program_cmd_write_image_first_i,
+		.program_cmd_write_image_last_i,
+		.program_cmd_write_expected_word_count_i,
+		.program_cmd_write_jump_address_i,
+		.program_load_start_valid_i(program_load_start_valid_i && program_load_start_ready_o),
+		.program_load_start_ready_o(loader_start_ready),
+		.program_load_start_command_count_i(program_load_start_command_count_i),
+		.ctrl_load_txn_valid_o(ctrl_load_txn_valid),
+		.ctrl_load_txn_ready_i(ctrl_load_txn_ready),
+		.ctrl_load_txn_source_address_o(ctrl_load_txn_source_address),
+		.ctrl_load_txn_byte_count_o(ctrl_load_txn_byte_count),
+		.ctrl_load_txn_scope_o(ctrl_load_txn_scope),
+		.ctrl_load_txn_destination_o(ctrl_load_txn_destination),
+		.ctrl_load_txn_format_o(ctrl_load_txn_format),
+		.ctrl_load_txn_imem_base_address_o(ctrl_load_txn_imem_base_address),
+		.ctrl_load_txn_image_first_o(ctrl_load_txn_image_first),
+		.ctrl_load_txn_image_last_o(ctrl_load_txn_image_last),
+		.ctrl_load_txn_expected_word_count_o(ctrl_load_txn_expected_word_count),
+		.ctrl_load_txn_dma_id_o(ctrl_load_txn_dma_id),
+		.ctrl_prime_valid_o(ctrl_prime_valid),
+		.ctrl_prime_ready_i(ctrl_prime_ready),
+		.ctrl_prime_scope_o(ctrl_prime_scope),
+		.ctrl_prime_destination_o(ctrl_prime_destination),
 		.load_pipeline_idle_i(load_pipeline_idle_w),
 		.command_pc_o(),
 		.busy_o(),
@@ -322,51 +322,51 @@ module lpu_program_load_system #(
 	lpu_program_load_path #(
 		.DMA_DATA_WIDTH(DMA_DATA_WIDTH),
 		.IMEM_DEPTH(MEM_IMEM_DEPTH)
-	) u_program_transfer (
+	) u_program_load_path (
 		.clk_i,
 		.rst_ni,
 		.clear_i(program_reset_i),
-		.transaction_valid_i(command_transaction_valid),
-		.transaction_ready_o(command_transaction_ready),
-		.transaction_source_address_i(command_transaction_source_address),
-		.transaction_byte_count_i(command_transaction_byte_count),
-		.transaction_scope_i(command_transaction_scope),
-		.transaction_destination_i(command_transaction_destination),
-		.transaction_format_i(command_transaction_format),
-		.transaction_imem_base_address_i(command_transaction_imem_base_address),
-		.transaction_image_first_i(command_transaction_image_first),
-		.transaction_image_last_i(command_transaction_image_last),
-		.transaction_expected_word_count_i(command_transaction_expected_word_count),
-		.transaction_dma_id_i(command_transaction_dma_id),
-		.dma_cmd_valid_o,
-		.dma_cmd_ready_i,
-		.dma_cmd_address_o,
-		.dma_cmd_length_o,
-		.dma_cmd_id_o,
-		.dma_rsp_valid_i,
-		.dma_rsp_ready_o,
-		.dma_rsp_data_i,
-		.dma_rsp_keep_i,
-		.dma_rsp_last_i,
-		.dma_rsp_id_i,
-		.dma_rsp_error_i,
-		.word_valid_o(transfer_word_valid),
-		.word_ready_i(transfer_word_ready),
-		.word_data_o(transfer_word_data),
-		.word_strb_o(transfer_word_strb),
-		.word_scope_o(transfer_word_scope),
-		.word_destination_o(transfer_word_destination),
-		.word_imem_address_o(transfer_word_imem_address),
-		.word_last_o(transfer_word_last),
-		.idle_o(transfer_idle),
+		.ctrl_load_txn_valid_i(ctrl_load_txn_valid),
+		.ctrl_load_txn_ready_o(ctrl_load_txn_ready),
+		.ctrl_load_txn_source_address_i(ctrl_load_txn_source_address),
+		.ctrl_load_txn_byte_count_i(ctrl_load_txn_byte_count),
+		.ctrl_load_txn_scope_i(ctrl_load_txn_scope),
+		.ctrl_load_txn_destination_i(ctrl_load_txn_destination),
+		.ctrl_load_txn_format_i(ctrl_load_txn_format),
+		.ctrl_load_txn_imem_base_address_i(ctrl_load_txn_imem_base_address),
+		.ctrl_load_txn_image_first_i(ctrl_load_txn_image_first),
+		.ctrl_load_txn_image_last_i(ctrl_load_txn_image_last),
+		.ctrl_load_txn_expected_word_count_i(ctrl_load_txn_expected_word_count),
+		.ctrl_load_txn_dma_id_i(ctrl_load_txn_dma_id),
+		.ddr_read_req_valid_o,
+		.ddr_read_req_ready_i,
+		.ddr_read_req_address_o,
+		.ddr_read_req_length_o,
+		.ddr_read_req_id_o,
+		.ddr_read_rsp_valid_i,
+		.ddr_read_rsp_ready_o,
+		.ddr_read_rsp_data_i,
+		.ddr_read_rsp_keep_i,
+		.ddr_read_rsp_last_i,
+		.ddr_read_rsp_id_i,
+		.ddr_read_rsp_error_i,
+		.load_word_valid_o(load_word_valid),
+		.load_word_ready_i(load_word_ready),
+		.load_word_data_o(load_word_data),
+		.load_word_strb_o(load_word_strb),
+		.load_word_scope_o(load_word_scope),
+		.load_word_destination_o(load_word_destination),
+		.load_word_imem_address_o(load_word_imem_address),
+		.load_word_last_o(load_word_last),
+		.idle_o(load_path_idle),
 		.generated_word_count_o(),
-		.fault_o(transfer_fault),
-		.fault_code_o(transfer_fault_code)
+		.fault_o(load_path_fault),
+		.fault_code_o(load_path_fault_code)
 	);
 
-	assign prime_enqueue_valid = command_commit_valid && load_pipeline_idle_w;
-	assign command_commit_ready = prime_enqueue_valid && prime_enqueue_ready;
-	assign prime_enqueue_data = {command_commit_scope, command_commit_destination};
+	assign prime_enqueue_valid = ctrl_prime_valid && load_pipeline_idle_w;
+	assign ctrl_prime_ready = prime_enqueue_valid && prime_enqueue_ready;
+	assign prime_enqueue_data = {ctrl_prime_scope, ctrl_prime_destination};
 
 	lpu_queue_fifo #(
 		.DATA_WIDTH(14),
@@ -388,28 +388,28 @@ module lpu_program_load_system #(
 
 	// PRIME records are emitted only after all Program Words have retired. Both
 	// sources use the same stable valid/ready Record interface to Distribution.
-	assign distribute_valid_o = prime_select_w ? prime_dequeue_valid : transfer_word_valid;
-	assign distribute_control_o = prime_select_w ? PROGRAM_LOAD_PRIME : PROGRAM_LOAD_WRITE;
-	assign distribute_data_o = prime_select_w ? '0 : transfer_word_data;
-	assign distribute_strb_o = prime_select_w ? '0 : transfer_word_strb;
-	assign distribute_scope_o = prime_select_w ? prime_dequeue_scope : transfer_word_scope;
-	assign distribute_destination_o = prime_select_w ? prime_dequeue_destination :
-		transfer_word_destination;
-	assign distribute_imem_address_o = prime_select_w ? '0 : transfer_word_imem_address;
-	assign distribute_last_o = prime_select_w ? 1'b1 : transfer_word_last;
-	assign prime_dequeue_ready = prime_select_w && distribute_ready_i;
-	assign transfer_word_ready = !prime_select_w && distribute_ready_i;
+	assign load_distribute_valid_o = prime_select_w ? prime_dequeue_valid : load_word_valid;
+	assign load_distribute_control_o = prime_select_w ? PROGRAM_LOAD_PRIME : PROGRAM_LOAD_WRITE;
+	assign load_distribute_data_o = prime_select_w ? '0 : load_word_data;
+	assign load_distribute_strb_o = prime_select_w ? '0 : load_word_strb;
+	assign load_distribute_scope_o = prime_select_w ? prime_dequeue_scope : load_word_scope;
+	assign load_distribute_destination_o = prime_select_w ? prime_dequeue_destination :
+		load_word_destination;
+	assign load_distribute_imem_address_o = prime_select_w ? '0 : load_word_imem_address;
+	assign load_distribute_last_o = prime_select_w ? 1'b1 : load_word_last;
+	assign prime_dequeue_ready = prime_select_w && load_distribute_ready_i;
+	assign load_word_ready = !prime_select_w && load_distribute_ready_i;
 
-	assign load_pipeline_idle_w = transfer_idle && distribute_idle_i;
+	assign load_pipeline_idle_w = load_path_idle && load_distribute_idle_i;
 	assign instruction_load_done = instruction_load_done_q;
 	assign loader_program_start = instruction_load_done_q &&
 		(start_pending_q && dependencies_ready_i) && cluster_frontends_ready && !loader_error;
-	assign loader_error = controller_fault_q || command_fault || transfer_fault ||
-		distribute_fault_i;
+	assign loader_error = controller_fault_q || command_fault || load_path_fault ||
+		load_distribute_fault_i;
 	assign loader_error_code = controller_fault_q ? controller_fault_code_q :
 		(command_fault ? command_fault_code :
-		(transfer_fault ? transfer_fault_code :
-		(distribute_fault_i ? distribute_fault_code_i : PROGRAM_FAULT_NONE)));
+		(load_path_fault ? load_path_fault_code :
+		(load_distribute_fault_i ? load_distribute_fault_code_i : PROGRAM_FAULT_NONE)));
 
 	// Completion is reached only after END and every buffered WRITE/acknowledgement retires.
 	always_ff @(posedge clk_i or negedge internal_rst_ni) begin
@@ -432,13 +432,13 @@ module lpu_program_load_system #(
 				controller_fault_q <= 1'b1;
 				controller_fault_code_q <= command_fault_code;
 			end
-			else if(transfer_fault)begin
+			else if(load_path_fault)begin
 				controller_fault_q <= 1'b1;
-				controller_fault_code_q <= transfer_fault_code;
+				controller_fault_code_q <= load_path_fault_code;
 			end
-			else if(distribute_fault_i)begin
+			else if(load_distribute_fault_i)begin
 				controller_fault_q <= 1'b1;
-				controller_fault_code_q <= distribute_fault_code_i;
+				controller_fault_code_q <= load_distribute_fault_code_i;
 			end
 		end
 	end
@@ -456,7 +456,7 @@ module lpu_program_load_system #(
 			program_done_q <= 1'b0;
 		end
 		else begin
-			if(load_start_valid_i && load_start_ready_o)begin
+			if(program_load_start_valid_i && program_load_start_ready_o)begin
 				load_request_active_q <= 1'b1;
 			end
 			if(program_start_request_i && !program_done_q)begin
@@ -490,7 +490,7 @@ module lpu_program_load_system #(
 			if(descriptor_invalid_w || descriptor_duplicate_w)begin
 				descriptor_fault_q <= 1'b1;
 			end
-			if(command_write_fire && (command_write_opcode_i == PROGRAM_LOADER_LOAD_IMEM) &&
+			if(program_cmd_write_fire && (program_cmd_write_opcode_i == PROGRAM_LOADER_LOAD_IMEM) &&
 				command_target_valid_w && !descriptor_invalid_w && !descriptor_duplicate_w)begin
 				case(command_target_kind_w)
 					PROGRAM_TARGET_MEM: mem_target_seen_q[command_global_target_w] <= 1'b1;

@@ -19,18 +19,18 @@ module lpu_fu_subsystem_cluster #(
 	input logic local_frontend_enable_i,
 	input logic external_run_i,
 
-	input logic program_distribute_valid_i,
-	output logic program_distribute_ready_o,
-	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] program_distribute_control_i,
-	input logic [127:0] program_distribute_data_i,
-	input logic [3:0] program_distribute_strb_i,
-	input logic [1:0] program_distribute_scope_i,
-	input logic [11:0] program_distribute_destination_i,
-	input logic [16:0] program_distribute_imem_address_i,
-	input logic program_distribute_last_i,
-	output logic program_distribute_idle_o,
-	output logic program_distribute_fault_o,
-	output logic [5:0] program_distribute_fault_code_o,
+	input logic load_distribute_valid_i,
+	output logic load_distribute_ready_o,
+	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] load_distribute_control_i,
+	input logic [127:0] load_distribute_data_i,
+	input logic [3:0] load_distribute_strb_i,
+	input logic [1:0] load_distribute_scope_i,
+	input logic [11:0] load_distribute_destination_i,
+	input logic [16:0] load_distribute_imem_address_i,
+	input logic load_distribute_last_i,
+	output logic load_distribute_idle_o,
+	output logic load_distribute_fault_o,
+	output logic [5:0] load_distribute_fault_code_o,
 
 	input logic program_start_i,
 	output logic program_start_ready_o,
@@ -266,23 +266,23 @@ module lpu_fu_subsystem_cluster #(
 		end
 	endgenerate
 
-	assign program_distribute_idle_o = program_distribution_idle;
-	assign program_distribute_fault_o = program_distribution_fault;
-	assign program_distribute_fault_code_o = program_distribution_fault_code;
+	assign load_distribute_idle_o = program_distribution_idle;
+	assign load_distribute_fault_o = program_distribution_fault;
+	assign load_distribute_fault_code_o = program_distribution_fault_code;
 
-	lpu_program_distribute_system u_program_distribute_system (
+	lpu_load_distribute_system u_load_distribute_system (
 		.clk_i,
 		.rst_ni,
 		.program_reset_i,
-		.distribute_valid_i(program_distribute_valid_i),
-		.distribute_ready_o(program_distribute_ready_o),
-		.distribute_control_i(program_distribute_control_i),
-		.distribute_data_i(program_distribute_data_i),
-		.distribute_strb_i(program_distribute_strb_i),
-		.distribute_scope_i(program_distribute_scope_i),
-		.distribute_destination_i(program_distribute_destination_i),
-		.distribute_imem_address_i(program_distribute_imem_address_i),
-		.distribute_last_i(program_distribute_last_i),
+		.load_distribute_valid_i(load_distribute_valid_i),
+		.load_distribute_ready_o(load_distribute_ready_o),
+		.load_distribute_control_i(load_distribute_control_i),
+		.load_distribute_data_i(load_distribute_data_i),
+		.load_distribute_strb_i(load_distribute_strb_i),
+		.load_distribute_scope_i(load_distribute_scope_i),
+		.load_distribute_destination_i(load_distribute_destination_i),
+		.load_distribute_imem_address_i(load_distribute_imem_address_i),
+		.load_distribute_last_i(load_distribute_last_i),
 		.mem_program_valid_o(mem_program_valid),
 		.mem_program_ready_i(mem_program_ready),
 		.mem_program_control_o(mem_program_control),

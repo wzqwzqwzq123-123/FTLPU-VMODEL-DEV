@@ -4,33 +4,33 @@ module lpu_program_distributor #(
 	input logic clk_i,
 	input logic rst_ni,
 
-	input logic input_valid_i,
-	output logic input_ready_o,
-	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] input_control_i,
-	input logic [127:0] input_data_i,
-	input logic [3:0] input_strb_i,
-	input logic [1:0] input_scope_i,
-	input logic [11:0] input_destination_i,
-	input logic [16:0] input_imem_address_i,
-	input logic input_last_i,
+	input logic load_record_valid_i,
+	output logic load_record_ready_o,
+	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] load_record_control_i,
+	input logic [127:0] load_record_data_i,
+	input logic [3:0] load_record_strb_i,
+	input logic [1:0] load_record_scope_i,
+	input logic [11:0] load_record_destination_i,
+	input logic [16:0] load_record_imem_address_i,
+	input logic load_record_last_i,
 
-	output logic west_valid_o,
-	input logic west_ready_i,
-	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] west_control_o,
-	output logic [127:0] west_data_o,
-	output logic [3:0] west_strb_o,
-	output logic [11:0] west_destination_o,
-	output logic [16:0] west_imem_address_o,
-	output logic west_last_o,
+	output logic west_relay_valid_o,
+	input logic west_relay_ready_i,
+	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] west_relay_control_o,
+	output logic [127:0] west_relay_data_o,
+	output logic [3:0] west_relay_strb_o,
+	output logic [11:0] west_relay_destination_o,
+	output logic [16:0] west_relay_imem_address_o,
+	output logic west_relay_last_o,
 
-	output logic east_valid_o,
-	input logic east_ready_i,
-	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] east_control_o,
-	output logic [127:0] east_data_o,
-	output logic [3:0] east_strb_o,
-	output logic [11:0] east_destination_o,
-	output logic [16:0] east_imem_address_o,
-	output logic east_last_o,
+	output logic east_relay_valid_o,
+	input logic east_relay_ready_i,
+	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] east_relay_control_o,
+	output logic [127:0] east_relay_data_o,
+	output logic [3:0] east_relay_strb_o,
+	output logic [11:0] east_relay_destination_o,
+	output logic [16:0] east_relay_imem_address_o,
+	output logic east_relay_last_o,
 
 	output logic idle_o,
 	output logic fault_o,
@@ -51,14 +51,14 @@ module lpu_program_distributor #(
 	logic [2:0] head_target_kind_w;
 	logic vxm_target_w;
 
-	logic west_required_w;
-	logic east_required_w;
-	logic west_done_q;
-	logic east_done_q;
-	logic west_fire;
-	logic east_fire;
-	logic west_complete_w;
-	logic east_complete_w;
+	logic west_relay_required_w;
+	logic east_relay_required_w;
+	logic west_relay_done_q;
+	logic east_relay_done_q;
+	logic west_relay_fire;
+	logic east_relay_fire;
+	logic west_relay_complete_w;
+	logic east_relay_complete_w;
 	logic scope_invalid_w;
 	logic scope_mismatch_w;
 	logic route_invalid_w;
@@ -66,27 +66,27 @@ module lpu_program_distributor #(
 
 	lpu_program_distribute_elastic_stage #(
 		.DEPTH(ELASTIC_DEPTH)
-	) u_input_elastic (
+	) u_load_record_elastic (
 		.clk_i,
 		.rst_ni,
-		.input_valid_i,
-		.input_ready_o,
-		.input_control_i,
-		.input_data_i,
-		.input_strb_i,
-		.input_scope_i,
-		.input_destination_i,
-		.input_imem_address_i,
-		.input_last_i,
-		.output_valid_o(head_valid),
-		.output_ready_i(head_ready),
-		.output_control_o(head_control),
-		.output_data_o(head_data),
-		.output_strb_o(head_strb),
-		.output_scope_o(head_scope),
-		.output_destination_o(head_destination),
-		.output_imem_address_o(head_imem_address),
-		.output_last_o(head_last),
+		.enqueue_valid_i(load_record_valid_i),
+		.enqueue_ready_o(load_record_ready_o),
+		.enqueue_control_i(load_record_control_i),
+		.enqueue_data_i(load_record_data_i),
+		.enqueue_strb_i(load_record_strb_i),
+		.enqueue_scope_i(load_record_scope_i),
+		.enqueue_destination_i(load_record_destination_i),
+		.enqueue_imem_address_i(load_record_imem_address_i),
+		.enqueue_last_i(load_record_last_i),
+		.dequeue_valid_o(head_valid),
+		.dequeue_ready_i(head_ready),
+		.dequeue_control_o(head_control),
+		.dequeue_data_o(head_data),
+		.dequeue_strb_o(head_strb),
+		.dequeue_scope_o(head_scope),
+		.dequeue_destination_o(head_destination),
+		.dequeue_imem_address_o(head_imem_address),
+		.dequeue_last_o(head_last),
 		.level_o(),
 		.idle_o(elastic_idle)
 	);
@@ -96,9 +96,9 @@ module lpu_program_distributor #(
 	assign vxm_target_w = head_target_kind_w == PROGRAM_TARGET_VXM;
 	// The central VXM uses the East output as its canonical direct branch. BOTH
 	// never duplicates a VXM Program Load request into both Hemisphere chains.
-	assign west_required_w = !vxm_target_w && ((head_scope == PROGRAM_SCOPE_WEST) ||
+	assign west_relay_required_w = !vxm_target_w && ((head_scope == PROGRAM_SCOPE_WEST) ||
 		(head_scope == PROGRAM_SCOPE_BOTH));
-	assign east_required_w = vxm_target_w || (head_scope == PROGRAM_SCOPE_EAST) ||
+	assign east_relay_required_w = vxm_target_w || (head_scope == PROGRAM_SCOPE_EAST) ||
 		(head_scope == PROGRAM_SCOPE_BOTH);
 	assign scope_invalid_w = (head_scope != PROGRAM_SCOPE_EAST) &&
 		(head_scope != PROGRAM_SCOPE_WEST) && (head_scope != PROGRAM_SCOPE_BOTH);
@@ -108,52 +108,52 @@ module lpu_program_distributor #(
 		 (head_destination[PROGRAM_DESTINATION_HEMISPHERE_BIT] != PROGRAM_HEMISPHERE_WEST));
 	assign route_invalid_w = head_valid && (scope_invalid_w || scope_mismatch_w);
 
-	assign west_valid_o = head_valid && west_required_w && !west_done_q && !fault_q;
-	assign east_valid_o = head_valid && east_required_w && !east_done_q && !fault_q;
-	assign west_fire = west_valid_o && west_ready_i;
-	assign east_fire = east_valid_o && east_ready_i;
-	assign west_complete_w = !west_required_w || west_done_q || west_fire;
-	assign east_complete_w = !east_required_w || east_done_q || east_fire;
+	assign west_relay_valid_o = head_valid && west_relay_required_w && !west_relay_done_q && !fault_q;
+	assign east_relay_valid_o = head_valid && east_relay_required_w && !east_relay_done_q && !fault_q;
+	assign west_relay_fire = west_relay_valid_o && west_relay_ready_i;
+	assign east_relay_fire = east_relay_valid_o && east_relay_ready_i;
+	assign west_relay_complete_w = !west_relay_required_w || west_relay_done_q || west_relay_fire;
+	assign east_relay_complete_w = !east_relay_required_w || east_relay_done_q || east_relay_fire;
 	assign head_ready = head_valid && (route_invalid_w ||
-		(west_complete_w && east_complete_w && !fault_q));
+		(west_relay_complete_w && east_relay_complete_w && !fault_q));
 
-	assign west_control_o = head_control;
-	assign west_data_o = head_data;
-	assign west_strb_o = head_strb;
-	assign west_destination_o = {PROGRAM_HEMISPHERE_WEST,
+	assign west_relay_control_o = head_control;
+	assign west_relay_data_o = head_data;
+	assign west_relay_strb_o = head_strb;
+	assign west_relay_destination_o = {PROGRAM_HEMISPHERE_WEST,
 		head_destination[PROGRAM_DESTINATION_KIND_MSB:PROGRAM_DESTINATION_INDEX_LSB]};
-	assign west_imem_address_o = head_imem_address;
-	assign west_last_o = head_last;
+	assign west_relay_imem_address_o = head_imem_address;
+	assign west_relay_last_o = head_last;
 
-	assign east_control_o = head_control;
-	assign east_data_o = head_data;
-	assign east_strb_o = head_strb;
-	assign east_destination_o = {PROGRAM_HEMISPHERE_EAST,
+	assign east_relay_control_o = head_control;
+	assign east_relay_data_o = head_data;
+	assign east_relay_strb_o = head_strb;
+	assign east_relay_destination_o = {PROGRAM_HEMISPHERE_EAST,
 		head_destination[PROGRAM_DESTINATION_KIND_MSB:PROGRAM_DESTINATION_INDEX_LSB]};
-	assign east_imem_address_o = head_imem_address;
-	assign east_last_o = head_last;
+	assign east_relay_imem_address_o = head_imem_address;
+	assign east_relay_last_o = head_last;
 
-	assign idle_o = elastic_idle && !west_done_q && !east_done_q;
+	assign idle_o = elastic_idle && !west_relay_done_q && !east_relay_done_q;
 	assign fault_o = fault_q || route_invalid_w;
 	assign fault_code_o = fault_o ? PROGRAM_FAULT_ROUTE : PROGRAM_FAULT_NONE;
 
 	// West and East are independent ready/valid branches; a BOTH command is retired after both handshakes.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
-			west_done_q <= 1'b0;
-			east_done_q <= 1'b0;
+			west_relay_done_q <= 1'b0;
+			east_relay_done_q <= 1'b0;
 		end
 		else begin
 			if(head_ready)begin
-				west_done_q <= 1'b0;
-				east_done_q <= 1'b0;
+				west_relay_done_q <= 1'b0;
+				east_relay_done_q <= 1'b0;
 			end
 			else begin
-				if(west_fire)begin
-					west_done_q <= 1'b1;
+				if(west_relay_fire)begin
+					west_relay_done_q <= 1'b1;
 				end
-				if(east_fire)begin
-					east_done_q <= 1'b1;
+				if(east_relay_fire)begin
+					east_relay_done_q <= 1'b1;
 				end
 			end
 		end

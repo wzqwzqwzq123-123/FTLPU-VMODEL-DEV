@@ -5,42 +5,42 @@ module lpu_program_load_controller #(
 	input logic clk_i,
 	input logic rst_ni,
 
-	input logic command_write_valid_i,
-	output logic command_write_ready_o,
-	input logic [COMMAND_ADDRESS_WIDTH-1:0] command_write_address_i,
-	input logic [2:0] command_write_opcode_i,
-	input logic [63:0] command_write_source_address_i,
-	input logic [31:0] command_write_byte_count_i,
-	input logic [1:0] command_write_scope_i,
-	input logic [11:0] command_write_destination_i,
-	input logic [1:0] command_write_format_i,
-	input logic [16:0] command_write_imem_base_address_i,
-	input logic command_write_image_first_i,
-	input logic command_write_image_last_i,
-	input logic [15:0] command_write_expected_word_count_i,
-	input logic [COMMAND_ADDRESS_WIDTH-1:0] command_write_jump_address_i,
+	input logic program_cmd_write_valid_i,
+	output logic program_cmd_write_ready_o,
+	input logic [COMMAND_ADDRESS_WIDTH-1:0] program_cmd_write_address_i,
+	input logic [2:0] program_cmd_write_opcode_i,
+	input logic [63:0] program_cmd_write_source_address_i,
+	input logic [31:0] program_cmd_write_byte_count_i,
+	input logic [1:0] program_cmd_write_scope_i,
+	input logic [11:0] program_cmd_write_destination_i,
+	input logic [1:0] program_cmd_write_format_i,
+	input logic [16:0] program_cmd_write_imem_base_address_i,
+	input logic program_cmd_write_image_first_i,
+	input logic program_cmd_write_image_last_i,
+	input logic [15:0] program_cmd_write_expected_word_count_i,
+	input logic [COMMAND_ADDRESS_WIDTH-1:0] program_cmd_write_jump_address_i,
 
-	input logic start_valid_i,
-	output logic start_ready_o,
-	input logic [COMMAND_ADDRESS_WIDTH:0] start_command_count_i,
+	input logic program_load_start_valid_i,
+	output logic program_load_start_ready_o,
+	input logic [COMMAND_ADDRESS_WIDTH:0] program_load_start_command_count_i,
 
-	output logic transaction_valid_o,
-	input logic transaction_ready_i,
-	output logic [63:0] transaction_source_address_o,
-	output logic [31:0] transaction_byte_count_o,
-	output logic [1:0] transaction_scope_o,
-	output logic [11:0] transaction_destination_o,
-	output logic [1:0] transaction_format_o,
-	output logic [16:0] transaction_imem_base_address_o,
-	output logic transaction_image_first_o,
-	output logic transaction_image_last_o,
-	output logic [15:0] transaction_expected_word_count_o,
-	output logic [7:0] transaction_dma_id_o,
+	output logic ctrl_load_txn_valid_o,
+	input logic ctrl_load_txn_ready_i,
+	output logic [63:0] ctrl_load_txn_source_address_o,
+	output logic [31:0] ctrl_load_txn_byte_count_o,
+	output logic [1:0] ctrl_load_txn_scope_o,
+	output logic [11:0] ctrl_load_txn_destination_o,
+	output logic [1:0] ctrl_load_txn_format_o,
+	output logic [16:0] ctrl_load_txn_imem_base_address_o,
+	output logic ctrl_load_txn_image_first_o,
+	output logic ctrl_load_txn_image_last_o,
+	output logic [15:0] ctrl_load_txn_expected_word_count_o,
+	output logic [7:0] ctrl_load_txn_dma_id_o,
 
-	output logic commit_valid_o,
-	input logic commit_ready_i,
-	output logic [1:0] commit_scope_o,
-	output logic [11:0] commit_destination_o,
+	output logic ctrl_prime_valid_o,
+	input logic ctrl_prime_ready_i,
+	output logic [1:0] ctrl_prime_scope_o,
+	output logic [11:0] ctrl_prime_destination_o,
 
 	input logic load_pipeline_idle_i,
 
@@ -55,7 +55,7 @@ module lpu_program_load_controller #(
 	localparam integer COMMAND_RECORD_WIDTH = 150 + COMMAND_ADDRESS_WIDTH;
 
 	logic [COMMAND_RECORD_WIDTH-1:0] command_mem_q [0:COMMAND_DEPTH-1];
-	logic [COMMAND_RECORD_WIDTH-1:0] command_write_record_w;
+	logic [COMMAND_RECORD_WIDTH-1:0] program_cmd_write_record_w;
 	logic [COMMAND_RECORD_WIDTH-1:0] active_record_q;
 
 	logic [2:0] active_opcode_w;
@@ -79,14 +79,14 @@ module lpu_program_load_controller #(
 	logic fault_q;
 	logic [5:0] fault_code_q;
 
-	logic command_write_fire;
-	logic start_fire;
+	logic program_cmd_write_fire;
+	logic program_load_start_fire;
 	logic fetch_command_w;
-	logic transaction_fire;
-	logic commit_fire;
+	logic ctrl_load_txn_fire;
+	logic ctrl_prime_fire;
 	logic active_complete_w;
 	logic active_invalid_w;
-	logic start_invalid_w;
+	logic program_load_start_invalid_w;
 	logic jump_invalid_w;
 
 	initial begin
@@ -95,18 +95,18 @@ module lpu_program_load_controller #(
 		end
 	end
 
-	assign command_write_record_w = {
-		command_write_opcode_i,
-		command_write_source_address_i,
-		command_write_byte_count_i,
-		command_write_scope_i,
-		command_write_destination_i,
-		command_write_format_i,
-		command_write_imem_base_address_i,
-		command_write_image_first_i,
-		command_write_image_last_i,
-		command_write_expected_word_count_i,
-		command_write_jump_address_i
+	assign program_cmd_write_record_w = {
+		program_cmd_write_opcode_i,
+		program_cmd_write_source_address_i,
+		program_cmd_write_byte_count_i,
+		program_cmd_write_scope_i,
+		program_cmd_write_destination_i,
+		program_cmd_write_format_i,
+		program_cmd_write_imem_base_address_i,
+		program_cmd_write_image_first_i,
+		program_cmd_write_image_last_i,
+		program_cmd_write_expected_word_count_i,
+		program_cmd_write_jump_address_i
 	};
 
 	assign {
@@ -123,34 +123,34 @@ module lpu_program_load_controller #(
 		active_jump_address_w
 	} = active_record_q;
 
-	assign command_write_ready_o = !busy_q;
-	assign command_write_fire = command_write_valid_i && command_write_ready_o;
-	assign start_ready_o = !busy_q;
-	assign start_fire = start_valid_i && start_ready_o;
-	assign start_invalid_w = start_fire &&
-		((start_command_count_i == '0) || (start_command_count_i > COMMAND_DEPTH));
+	assign program_cmd_write_ready_o = !busy_q;
+	assign program_cmd_write_fire = program_cmd_write_valid_i && program_cmd_write_ready_o;
+	assign program_load_start_ready_o = !busy_q;
+	assign program_load_start_fire = program_load_start_valid_i && program_load_start_ready_o;
+	assign program_load_start_invalid_w = program_load_start_fire &&
+		((program_load_start_command_count_i == '0) || (program_load_start_command_count_i > COMMAND_DEPTH));
 	assign fetch_command_w = busy_q && !active_valid_q &&
 		(command_pc_q < command_count_q);
 
-	assign transaction_valid_o = active_valid_q &&
+	assign ctrl_load_txn_valid_o = active_valid_q &&
 		(active_opcode_w == PROGRAM_LOADER_LOAD_IMEM) && !fault_q;
-	assign transaction_fire = transaction_valid_o && transaction_ready_i;
-	assign transaction_source_address_o = active_source_address_w;
-	assign transaction_byte_count_o = active_byte_count_w;
-	assign transaction_scope_o = active_scope_w;
-	assign transaction_destination_o = active_destination_w;
-	assign transaction_format_o = active_format_w;
-	assign transaction_imem_base_address_o = active_imem_base_address_w;
-	assign transaction_image_first_o = active_image_first_w;
-	assign transaction_image_last_o = active_image_last_w;
-	assign transaction_expected_word_count_o = active_expected_word_count_w;
-	assign transaction_dma_id_o = next_dma_id_q;
+	assign ctrl_load_txn_fire = ctrl_load_txn_valid_o && ctrl_load_txn_ready_i;
+	assign ctrl_load_txn_source_address_o = active_source_address_w;
+	assign ctrl_load_txn_byte_count_o = active_byte_count_w;
+	assign ctrl_load_txn_scope_o = active_scope_w;
+	assign ctrl_load_txn_destination_o = active_destination_w;
+	assign ctrl_load_txn_format_o = active_format_w;
+	assign ctrl_load_txn_imem_base_address_o = active_imem_base_address_w;
+	assign ctrl_load_txn_image_first_o = active_image_first_w;
+	assign ctrl_load_txn_image_last_o = active_image_last_w;
+	assign ctrl_load_txn_expected_word_count_o = active_expected_word_count_w;
+	assign ctrl_load_txn_dma_id_o = next_dma_id_q;
 
-	assign commit_valid_o = active_valid_q &&
+	assign ctrl_prime_valid_o = active_valid_q &&
 		(active_opcode_w == PROGRAM_LOADER_COMMIT_QUEUE) && !fault_q;
-	assign commit_fire = commit_valid_o && commit_ready_i;
-	assign commit_scope_o = active_scope_w;
-	assign commit_destination_o = active_destination_w;
+	assign ctrl_prime_fire = ctrl_prime_valid_o && ctrl_prime_ready_i;
+	assign ctrl_prime_scope_o = active_scope_w;
+	assign ctrl_prime_destination_o = active_destination_w;
 
 	assign jump_invalid_w = active_valid_q &&
 		(active_opcode_w == PROGRAM_LOADER_JUMP) &&
@@ -158,9 +158,9 @@ module lpu_program_load_controller #(
 	assign active_invalid_w = active_valid_q &&
 		((active_opcode_w > PROGRAM_LOADER_END) || jump_invalid_w);
 	assign active_complete_w = active_valid_q && (
-		((active_opcode_w == PROGRAM_LOADER_LOAD_IMEM) && transaction_fire) ||
+		((active_opcode_w == PROGRAM_LOADER_LOAD_IMEM) && ctrl_load_txn_fire) ||
 		((active_opcode_w == PROGRAM_LOADER_WAIT_DMA) && load_pipeline_idle_i) ||
-		((active_opcode_w == PROGRAM_LOADER_COMMIT_QUEUE) && commit_fire) ||
+		((active_opcode_w == PROGRAM_LOADER_COMMIT_QUEUE) && ctrl_prime_fire) ||
 		(active_opcode_w == PROGRAM_LOADER_NEXT) ||
 		((active_opcode_w == PROGRAM_LOADER_JUMP) && !jump_invalid_w) ||
 		(active_opcode_w == PROGRAM_LOADER_END));
@@ -168,7 +168,7 @@ module lpu_program_load_controller #(
 	assign command_pc_o = command_pc_q;
 	assign busy_o = busy_q;
 	assign done_o = done_q;
-	assign fault_o = fault_q || start_invalid_w || active_invalid_w ||
+	assign fault_o = fault_q || program_load_start_invalid_w || active_invalid_w ||
 		(busy_q && !active_valid_q && (command_pc_q >= command_count_q));
 	assign fault_code_o = fault_q ? fault_code_q :
 		(fault_o ? PROGRAM_FAULT_COMMAND : PROGRAM_FAULT_NONE);
@@ -176,8 +176,8 @@ module lpu_program_load_controller #(
 	// Host programming is disabled while the sequencer owns the command RAM.
 	always_ff @(posedge clk_i) begin
 		if(rst_ni)begin
-			if(command_write_fire)begin
-				command_mem_q[command_write_address_i] <= command_write_record_w;
+			if(program_cmd_write_fire)begin
+				command_mem_q[program_cmd_write_address_i] <= program_cmd_write_record_w;
 			end
 		end
 	end
@@ -203,11 +203,11 @@ module lpu_program_load_controller #(
 			next_dma_id_q <= '0;
 		end
 		else begin
-			if(start_fire)begin
+			if(program_load_start_fire)begin
 				command_pc_q <= '0;
-				command_count_q <= start_command_count_i;
+				command_count_q <= program_load_start_command_count_i;
 				active_valid_q <= 1'b0;
-				busy_q <= !start_invalid_w;
+				busy_q <= !program_load_start_invalid_w;
 				done_q <= 1'b0;
 				next_dma_id_q <= '0;
 			end
@@ -245,7 +245,7 @@ module lpu_program_load_controller #(
 			fault_code_q <= PROGRAM_FAULT_NONE;
 		end
 		else if(!fault_q)begin
-			if(start_invalid_w || active_invalid_w ||
+			if(program_load_start_invalid_w || active_invalid_w ||
 				(busy_q && !active_valid_q && (command_pc_q >= command_count_q)))begin
 				fault_q <= 1'b1;
 				fault_code_q <= PROGRAM_FAULT_COMMAND;

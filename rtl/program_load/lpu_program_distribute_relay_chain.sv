@@ -17,41 +17,41 @@ module lpu_program_distribute_relay_chain #(
 	input logic clk_i,
 	input logic rst_ni,
 
-	input logic input_valid_i,
-	output logic input_ready_o,
-	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] input_control_i,
-	input logic [127:0] input_data_i,
-	input logic [3:0] input_strb_i,
-	input logic [1:0] input_scope_i,
-	input logic [11:0] input_destination_i,
-	input logic [16:0] input_imem_address_i,
-	input logic input_last_i,
+	input logic distributor_record_valid_i,
+	output logic distributor_record_ready_o,
+	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] distributor_record_control_i,
+	input logic [127:0] distributor_record_data_i,
+	input logic [3:0] distributor_record_strb_i,
+	input logic [1:0] distributor_record_scope_i,
+	input logic [11:0] distributor_record_destination_i,
+	input logic [16:0] distributor_record_imem_address_i,
+	input logic distributor_record_last_i,
 
 	// Every Relay owns one independent local MEM region. The one-hot valid and
 	// ready vectors select a Bank, while each Relay exports one shared Record.
-	output logic [MEM_BANK_COUNT-1:0] mem_local_valid_o,
-	input logic [MEM_BANK_COUNT-1:0] mem_local_ready_i,
+	output logic [MEM_BANK_COUNT-1:0] mem_endpoint_valid_o,
+	input logic [MEM_BANK_COUNT-1:0] mem_endpoint_ready_i,
 	output logic [RELAY_COUNT*lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0]
-		mem_local_control_o,
-	output logic [RELAY_COUNT*128-1:0] mem_local_data_o,
-	output logic [RELAY_COUNT*4-1:0] mem_local_strb_o,
-	output logic [RELAY_COUNT*2-1:0] mem_local_scope_o,
-	output logic [RELAY_COUNT*12-1:0] mem_local_destination_o,
-	output logic [RELAY_COUNT*17-1:0] mem_local_imem_address_o,
-	output logic [RELAY_COUNT-1:0] mem_local_last_o,
+		mem_endpoint_control_o,
+	output logic [RELAY_COUNT*128-1:0] mem_endpoint_data_o,
+	output logic [RELAY_COUNT*4-1:0] mem_endpoint_strb_o,
+	output logic [RELAY_COUNT*2-1:0] mem_endpoint_scope_o,
+	output logic [RELAY_COUNT*12-1:0] mem_endpoint_destination_o,
+	output logic [RELAY_COUNT*17-1:0] mem_endpoint_imem_address_o,
+	output logic [RELAY_COUNT-1:0] mem_endpoint_last_o,
 
 	// R6 terminates MXM/SXM traffic on this unified boundary. The destination
 	// remains intact so the owning FU Subsystem performs its local decode.
-	output logic outer_local_valid_o,
-	input logic outer_local_ready_i,
+	output logic outer_endpoint_valid_o,
+	input logic outer_endpoint_ready_i,
 	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0]
-		outer_local_control_o,
-	output logic [127:0] outer_local_data_o,
-	output logic [3:0] outer_local_strb_o,
-	output logic [1:0] outer_local_scope_o,
-	output logic [11:0] outer_local_destination_o,
-	output logic [16:0] outer_local_imem_address_o,
-	output logic outer_local_last_o,
+		outer_endpoint_control_o,
+	output logic [127:0] outer_endpoint_data_o,
+	output logic [3:0] outer_endpoint_strb_o,
+	output logic [1:0] outer_endpoint_scope_o,
+	output logic [11:0] outer_endpoint_destination_o,
+	output logic [16:0] outer_endpoint_imem_address_o,
+	output logic outer_endpoint_last_o,
 
 	output logic [RELAY_COUNT*$clog2(BUFFER_DEPTH+1)-1:0] relay_level_o,
 	output logic idle_o,
@@ -104,15 +104,15 @@ module lpu_program_distribute_relay_chain #(
 		end
 	end
 
-	assign relay_input_valid[0] = input_valid_i && !fault_o;
-	assign input_ready_o = relay_input_ready[0] && !fault_o;
-	assign relay_input_control[0+:PROGRAM_LOAD_CONTROL_WIDTH] = input_control_i;
-	assign relay_input_data[0+:128] = input_data_i;
-	assign relay_input_strb[0+:4] = input_strb_i;
-	assign relay_input_scope[0+:2] = input_scope_i;
-	assign relay_input_destination[0+:12] = input_destination_i;
-	assign relay_input_imem_address[0+:17] = input_imem_address_i;
-	assign relay_input_last[0] = input_last_i;
+	assign relay_input_valid[0] = distributor_record_valid_i && !fault_o;
+	assign distributor_record_ready_o = relay_input_ready[0] && !fault_o;
+	assign relay_input_control[0+:PROGRAM_LOAD_CONTROL_WIDTH] = distributor_record_control_i;
+	assign relay_input_data[0+:128] = distributor_record_data_i;
+	assign relay_input_strb[0+:4] = distributor_record_strb_i;
+	assign relay_input_scope[0+:2] = distributor_record_scope_i;
+	assign relay_input_destination[0+:12] = distributor_record_destination_i;
+	assign relay_input_imem_address[0+:17] = distributor_record_imem_address_i;
+	assign relay_input_last[0] = distributor_record_last_i;
 
 	generate
 		for(genvar relay_gen = 0; relay_gen < RELAY_COUNT; relay_gen = relay_gen + 1)begin : gen_relay
@@ -126,8 +126,8 @@ module lpu_program_distribute_relay_chain #(
 			logic [LOCAL_BANK_COUNT-1:0] local_valid;
 			logic [LOCAL_BANK_COUNT-1:0] local_ready;
 
-			assign local_ready = mem_local_ready_i[LOCAL_BANK_BASE+:LOCAL_BANK_COUNT];
-			assign mem_local_valid_o[LOCAL_BANK_BASE+:LOCAL_BANK_COUNT] = local_valid;
+			assign local_ready = mem_endpoint_ready_i[LOCAL_BANK_BASE+:LOCAL_BANK_COUNT];
+			assign mem_endpoint_valid_o[LOCAL_BANK_BASE+:LOCAL_BANK_COUNT] = local_valid;
 
 			if(relay_gen > 0)begin : gen_relay_input
 				assign relay_input_valid[relay_gen] = relay_forward_valid[relay_gen-1];
@@ -160,36 +160,36 @@ module lpu_program_distribute_relay_chain #(
 			) u_relay (
 				.clk_i,
 				.rst_ni,
-				.input_valid_i(relay_input_valid[relay_gen]),
-				.input_ready_o(relay_input_ready[relay_gen]),
-				.input_control_i(relay_input_control[
+				.chain_record_valid_i(relay_input_valid[relay_gen]),
+				.chain_record_ready_o(relay_input_ready[relay_gen]),
+				.chain_record_control_i(relay_input_control[
 					relay_gen*PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH]),
-				.input_data_i(relay_input_data[relay_gen*128+:128]),
-				.input_strb_i(relay_input_strb[relay_gen*4+:4]),
-				.input_scope_i(relay_input_scope[relay_gen*2+:2]),
-				.input_destination_i(relay_input_destination[relay_gen*12+:12]),
-				.input_imem_address_i(relay_input_imem_address[relay_gen*17+:17]),
-				.input_last_i(relay_input_last[relay_gen]),
-				.local_valid_o(local_valid),
-				.local_ready_i(local_ready),
-				.local_control_o(mem_local_control_o[
+				.chain_record_data_i(relay_input_data[relay_gen*128+:128]),
+				.chain_record_strb_i(relay_input_strb[relay_gen*4+:4]),
+				.chain_record_scope_i(relay_input_scope[relay_gen*2+:2]),
+				.chain_record_destination_i(relay_input_destination[relay_gen*12+:12]),
+				.chain_record_imem_address_i(relay_input_imem_address[relay_gen*17+:17]),
+				.chain_record_last_i(relay_input_last[relay_gen]),
+				.local_endpoint_valid_o(local_valid),
+				.local_endpoint_ready_i(local_ready),
+				.local_endpoint_control_o(mem_endpoint_control_o[
 					relay_gen*PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH]),
-				.local_data_o(mem_local_data_o[relay_gen*128+:128]),
-				.local_strb_o(mem_local_strb_o[relay_gen*4+:4]),
-				.local_scope_o(mem_local_scope_o[relay_gen*2+:2]),
-				.local_destination_o(mem_local_destination_o[relay_gen*12+:12]),
-				.local_imem_address_o(mem_local_imem_address_o[relay_gen*17+:17]),
-				.local_last_o(mem_local_last_o[relay_gen]),
-				.forward_valid_o(relay_forward_valid[relay_gen]),
-				.forward_ready_i(relay_forward_ready[relay_gen]),
-				.forward_control_o(relay_forward_control[
+				.local_endpoint_data_o(mem_endpoint_data_o[relay_gen*128+:128]),
+				.local_endpoint_strb_o(mem_endpoint_strb_o[relay_gen*4+:4]),
+				.local_endpoint_scope_o(mem_endpoint_scope_o[relay_gen*2+:2]),
+				.local_endpoint_destination_o(mem_endpoint_destination_o[relay_gen*12+:12]),
+				.local_endpoint_imem_address_o(mem_endpoint_imem_address_o[relay_gen*17+:17]),
+				.local_endpoint_last_o(mem_endpoint_last_o[relay_gen]),
+				.next_relay_valid_o(relay_forward_valid[relay_gen]),
+				.next_relay_ready_i(relay_forward_ready[relay_gen]),
+				.next_relay_control_o(relay_forward_control[
 					relay_gen*PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH]),
-				.forward_data_o(relay_forward_data[relay_gen*128+:128]),
-				.forward_strb_o(relay_forward_strb[relay_gen*4+:4]),
-				.forward_scope_o(relay_forward_scope[relay_gen*2+:2]),
-				.forward_destination_o(relay_forward_destination[relay_gen*12+:12]),
-				.forward_imem_address_o(relay_forward_imem_address[relay_gen*17+:17]),
-				.forward_last_o(relay_forward_last[relay_gen]),
+				.next_relay_data_o(relay_forward_data[relay_gen*128+:128]),
+				.next_relay_strb_o(relay_forward_strb[relay_gen*4+:4]),
+				.next_relay_scope_o(relay_forward_scope[relay_gen*2+:2]),
+				.next_relay_destination_o(relay_forward_destination[relay_gen*12+:12]),
+				.next_relay_imem_address_o(relay_forward_imem_address[relay_gen*17+:17]),
+				.next_relay_last_o(relay_forward_last[relay_gen]),
 				.level_o(relay_level_o[relay_gen*LEVEL_WIDTH+:LEVEL_WIDTH]),
 				.idle_o(relay_idle[relay_gen]),
 				.fault_o(relay_fault[relay_gen]),
@@ -212,20 +212,20 @@ module lpu_program_distribute_relay_chain #(
 		 (tail_target_index_w < SXM_INSTANCES_PER_HEMISPHERE));
 	assign tail_invalid_w = relay_forward_valid[RELAY_COUNT-1] && !tail_target_valid_w;
 	assign relay_forward_ready[RELAY_COUNT-1] = tail_target_valid_w ?
-		outer_local_ready_i : 1'b1;
+		outer_endpoint_ready_i : 1'b1;
 
-	assign outer_local_valid_o = relay_forward_valid[RELAY_COUNT-1] &&
+	assign outer_endpoint_valid_o = relay_forward_valid[RELAY_COUNT-1] &&
 		tail_target_valid_w && !tail_fault_q;
-	assign outer_local_control_o = relay_forward_control[
+	assign outer_endpoint_control_o = relay_forward_control[
 		(RELAY_COUNT-1)*PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH];
-	assign outer_local_data_o = relay_forward_data[(RELAY_COUNT-1)*128+:128];
-	assign outer_local_strb_o = relay_forward_strb[(RELAY_COUNT-1)*4+:4];
-	assign outer_local_scope_o = relay_forward_scope[(RELAY_COUNT-1)*2+:2];
-	assign outer_local_destination_o = relay_forward_destination[(RELAY_COUNT-1)*12+:12];
-	assign outer_local_imem_address_o = relay_forward_imem_address[(RELAY_COUNT-1)*17+:17];
-	assign outer_local_last_o = relay_forward_last[RELAY_COUNT-1];
+	assign outer_endpoint_data_o = relay_forward_data[(RELAY_COUNT-1)*128+:128];
+	assign outer_endpoint_strb_o = relay_forward_strb[(RELAY_COUNT-1)*4+:4];
+	assign outer_endpoint_scope_o = relay_forward_scope[(RELAY_COUNT-1)*2+:2];
+	assign outer_endpoint_destination_o = relay_forward_destination[(RELAY_COUNT-1)*12+:12];
+	assign outer_endpoint_imem_address_o = relay_forward_imem_address[(RELAY_COUNT-1)*17+:17];
+	assign outer_endpoint_last_o = relay_forward_last[RELAY_COUNT-1];
 
-	assign idle_o = (&relay_idle) && !outer_local_valid_o;
+	assign idle_o = (&relay_idle) && !outer_endpoint_valid_o;
 	assign fault_o = (|relay_fault) || tail_fault_q || tail_invalid_w;
 	assign fault_code_o = fault_o ? PROGRAM_FAULT_ROUTE : PROGRAM_FAULT_NONE;
 

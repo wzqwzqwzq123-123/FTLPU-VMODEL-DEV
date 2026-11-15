@@ -5,15 +5,15 @@ module lpu_program_distribute_system (
 	input logic rst_ni,
 	input logic program_reset_i,
 
-	input logic distribute_valid_i,
-	output logic distribute_ready_o,
-	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] distribute_control_i,
-	input logic [127:0] distribute_data_i,
-	input logic [3:0] distribute_strb_i,
-	input logic [1:0] distribute_scope_i,
-	input logic [11:0] distribute_destination_i,
-	input logic [16:0] distribute_imem_address_i,
-	input logic distribute_last_i,
+	input logic load_distribute_valid_i,
+	output logic load_distribute_ready_o,
+	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] load_distribute_control_i,
+	input logic [127:0] load_distribute_data_i,
+	input logic [3:0] load_distribute_strb_i,
+	input logic [1:0] load_distribute_scope_i,
+	input logic [11:0] load_distribute_destination_i,
+	input logic [16:0] load_distribute_imem_address_i,
+	input logic load_distribute_last_i,
 
 	output logic [1:0] mem_program_valid_o,
 	input logic [1:0] mem_program_ready_i,
@@ -195,31 +195,31 @@ module lpu_program_distribute_system (
 	lpu_program_distributor u_distributor (
 		.clk_i,
 		.rst_ni(program_transport_rst_ni),
-		.input_valid_i(distribute_valid_i),
-		.input_ready_o(distribute_ready_o),
-		.input_control_i(distribute_control_i),
-		.input_data_i(distribute_data_i),
-		.input_strb_i(distribute_strb_i),
-		.input_scope_i(distribute_scope_i),
-		.input_destination_i(distribute_destination_i),
-		.input_imem_address_i(distribute_imem_address_i),
-		.input_last_i(distribute_last_i),
-		.west_valid_o(endpoint_load_valid[1]),
-		.west_ready_i(endpoint_load_ready[1]),
-		.west_control_o(endpoint_load_control[PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH]),
-		.west_data_o(endpoint_load_data[128+:128]),
-		.west_strb_o(endpoint_load_strb[4+:4]),
-		.west_destination_o(endpoint_load_destination[12+:12]),
-		.west_imem_address_o(endpoint_load_imem_address[17+:17]),
-		.west_last_o(endpoint_load_last[1]),
-		.east_valid_o(endpoint_load_valid[0]),
-		.east_ready_i(endpoint_load_ready[0]),
-		.east_control_o(endpoint_load_control[0+:PROGRAM_LOAD_CONTROL_WIDTH]),
-		.east_data_o(endpoint_load_data[0+:128]),
-		.east_strb_o(endpoint_load_strb[0+:4]),
-		.east_destination_o(endpoint_load_destination[0+:12]),
-		.east_imem_address_o(endpoint_load_imem_address[0+:17]),
-		.east_last_o(endpoint_load_last[0]),
+		.load_record_valid_i(load_distribute_valid_i),
+		.load_record_ready_o(load_distribute_ready_o),
+		.load_record_control_i(load_distribute_control_i),
+		.load_record_data_i(load_distribute_data_i),
+		.load_record_strb_i(load_distribute_strb_i),
+		.load_record_scope_i(load_distribute_scope_i),
+		.load_record_destination_i(load_distribute_destination_i),
+		.load_record_imem_address_i(load_distribute_imem_address_i),
+		.load_record_last_i(load_distribute_last_i),
+		.west_relay_valid_o(endpoint_load_valid[1]),
+		.west_relay_ready_i(endpoint_load_ready[1]),
+		.west_relay_control_o(endpoint_load_control[PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH]),
+		.west_relay_data_o(endpoint_load_data[128+:128]),
+		.west_relay_strb_o(endpoint_load_strb[4+:4]),
+		.west_relay_destination_o(endpoint_load_destination[12+:12]),
+		.west_relay_imem_address_o(endpoint_load_imem_address[17+:17]),
+		.west_relay_last_o(endpoint_load_last[1]),
+		.east_relay_valid_o(endpoint_load_valid[0]),
+		.east_relay_ready_i(endpoint_load_ready[0]),
+		.east_relay_control_o(endpoint_load_control[0+:PROGRAM_LOAD_CONTROL_WIDTH]),
+		.east_relay_data_o(endpoint_load_data[0+:128]),
+		.east_relay_strb_o(endpoint_load_strb[0+:4]),
+		.east_relay_destination_o(endpoint_load_destination[0+:12]),
+		.east_relay_imem_address_o(endpoint_load_imem_address[0+:17]),
+		.east_relay_last_o(endpoint_load_last[0]),
 		.idle_o(distributor_idle),
 		.fault_o(distributor_fault),
 		.fault_code_o(distributor_fault_code)
@@ -256,47 +256,47 @@ module lpu_program_distribute_system (
 			) u_program_relay_chain (
 				.clk_i,
 				.rst_ni(program_transport_rst_ni),
-				.input_valid_i(relay_chain_input_valid[chain_gen]),
-				.input_ready_o(relay_chain_input_ready[chain_gen]),
-				.input_control_i(endpoint_load_control[
+				.distributor_record_valid_i(relay_chain_input_valid[chain_gen]),
+				.distributor_record_ready_o(relay_chain_input_ready[chain_gen]),
+				.distributor_record_control_i(endpoint_load_control[
 					chain_gen*PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH]),
-				.input_data_i(endpoint_load_data[chain_gen*128+:128]),
-				.input_strb_i(endpoint_load_strb[chain_gen*4+:4]),
-				.input_scope_i(chain_gen == 0 ? PROGRAM_SCOPE_EAST : PROGRAM_SCOPE_WEST),
-				.input_destination_i(endpoint_load_destination[chain_gen*12+:12]),
-				.input_imem_address_i(endpoint_load_imem_address[chain_gen*17+:17]),
-				.input_last_i(endpoint_load_last[chain_gen]),
-				.mem_local_valid_o(relay_mem_valid[
+				.distributor_record_data_i(endpoint_load_data[chain_gen*128+:128]),
+				.distributor_record_strb_i(endpoint_load_strb[chain_gen*4+:4]),
+				.distributor_record_scope_i(chain_gen == 0 ? PROGRAM_SCOPE_EAST : PROGRAM_SCOPE_WEST),
+				.distributor_record_destination_i(endpoint_load_destination[chain_gen*12+:12]),
+				.distributor_record_imem_address_i(endpoint_load_imem_address[chain_gen*17+:17]),
+				.distributor_record_last_i(endpoint_load_last[chain_gen]),
+				.mem_endpoint_valid_o(relay_mem_valid[
 					chain_gen*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:
 					lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
-				.mem_local_ready_i(relay_mem_ready[
+				.mem_endpoint_ready_i(relay_mem_ready[
 					chain_gen*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:
 					lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
-				.mem_local_control_o(relay_mem_control[
+				.mem_endpoint_control_o(relay_mem_control[
 					chain_gen*PROGRAM_RELAY_COUNT*PROGRAM_LOAD_CONTROL_WIDTH+:
 					PROGRAM_RELAY_COUNT*PROGRAM_LOAD_CONTROL_WIDTH]),
-				.mem_local_data_o(relay_mem_data[
+				.mem_endpoint_data_o(relay_mem_data[
 					chain_gen*PROGRAM_RELAY_COUNT*128+:PROGRAM_RELAY_COUNT*128]),
-				.mem_local_strb_o(relay_mem_strb[
+				.mem_endpoint_strb_o(relay_mem_strb[
 					chain_gen*PROGRAM_RELAY_COUNT*4+:PROGRAM_RELAY_COUNT*4]),
-				.mem_local_scope_o(relay_mem_scope[
+				.mem_endpoint_scope_o(relay_mem_scope[
 					chain_gen*PROGRAM_RELAY_COUNT*2+:PROGRAM_RELAY_COUNT*2]),
-				.mem_local_destination_o(relay_mem_destination[
+				.mem_endpoint_destination_o(relay_mem_destination[
 					chain_gen*PROGRAM_RELAY_COUNT*12+:PROGRAM_RELAY_COUNT*12]),
-				.mem_local_imem_address_o(relay_mem_address[
+				.mem_endpoint_imem_address_o(relay_mem_address[
 					chain_gen*PROGRAM_RELAY_COUNT*17+:PROGRAM_RELAY_COUNT*17]),
-				.mem_local_last_o(relay_mem_last[
+				.mem_endpoint_last_o(relay_mem_last[
 					chain_gen*PROGRAM_RELAY_COUNT+:PROGRAM_RELAY_COUNT]),
-				.outer_local_valid_o(relay_outer_valid[chain_gen]),
-				.outer_local_ready_i(relay_outer_ready[chain_gen]),
-				.outer_local_control_o(relay_outer_control[
+				.outer_endpoint_valid_o(relay_outer_valid[chain_gen]),
+				.outer_endpoint_ready_i(relay_outer_ready[chain_gen]),
+				.outer_endpoint_control_o(relay_outer_control[
 					chain_gen*PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH]),
-				.outer_local_data_o(relay_outer_data[chain_gen*128+:128]),
-				.outer_local_strb_o(relay_outer_strb[chain_gen*4+:4]),
-				.outer_local_scope_o(relay_outer_scope[chain_gen*2+:2]),
-				.outer_local_destination_o(relay_outer_destination[chain_gen*12+:12]),
-				.outer_local_imem_address_o(relay_outer_address[chain_gen*17+:17]),
-				.outer_local_last_o(relay_outer_last[chain_gen]),
+				.outer_endpoint_data_o(relay_outer_data[chain_gen*128+:128]),
+				.outer_endpoint_strb_o(relay_outer_strb[chain_gen*4+:4]),
+				.outer_endpoint_scope_o(relay_outer_scope[chain_gen*2+:2]),
+				.outer_endpoint_destination_o(relay_outer_destination[chain_gen*12+:12]),
+				.outer_endpoint_imem_address_o(relay_outer_address[chain_gen*17+:17]),
+				.outer_endpoint_last_o(relay_outer_last[chain_gen]),
 				.relay_level_o(),
 				.idle_o(relay_chain_idle[chain_gen]),
 				.fault_o(relay_chain_fault[chain_gen]),

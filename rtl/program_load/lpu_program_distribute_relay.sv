@@ -20,35 +20,35 @@ module lpu_program_distribute_relay #(
 	input logic clk_i,
 	input logic rst_ni,
 
-	input logic input_valid_i,
-	output logic input_ready_o,
-	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] input_control_i,
-	input logic [127:0] input_data_i,
-	input logic [3:0] input_strb_i,
-	input logic [1:0] input_scope_i,
-	input logic [11:0] input_destination_i,
-	input logic [16:0] input_imem_address_i,
-	input logic input_last_i,
+	input logic chain_record_valid_i,
+	output logic chain_record_ready_o,
+	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] chain_record_control_i,
+	input logic [127:0] chain_record_data_i,
+	input logic [3:0] chain_record_strb_i,
+	input logic [1:0] chain_record_scope_i,
+	input logic [11:0] chain_record_destination_i,
+	input logic [16:0] chain_record_imem_address_i,
+	input logic chain_record_last_i,
 
-	output logic [LOCAL_BANK_COUNT-1:0] local_valid_o,
-	input logic [LOCAL_BANK_COUNT-1:0] local_ready_i,
-	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] local_control_o,
-	output logic [127:0] local_data_o,
-	output logic [3:0] local_strb_o,
-	output logic [1:0] local_scope_o,
-	output logic [11:0] local_destination_o,
-	output logic [16:0] local_imem_address_o,
-	output logic local_last_o,
+	output logic [LOCAL_BANK_COUNT-1:0] local_endpoint_valid_o,
+	input logic [LOCAL_BANK_COUNT-1:0] local_endpoint_ready_i,
+	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] local_endpoint_control_o,
+	output logic [127:0] local_endpoint_data_o,
+	output logic [3:0] local_endpoint_strb_o,
+	output logic [1:0] local_endpoint_scope_o,
+	output logic [11:0] local_endpoint_destination_o,
+	output logic [16:0] local_endpoint_imem_address_o,
+	output logic local_endpoint_last_o,
 
-	output logic forward_valid_o,
-	input logic forward_ready_i,
-	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] forward_control_o,
-	output logic [127:0] forward_data_o,
-	output logic [3:0] forward_strb_o,
-	output logic [1:0] forward_scope_o,
-	output logic [11:0] forward_destination_o,
-	output logic [16:0] forward_imem_address_o,
-	output logic forward_last_o,
+	output logic next_relay_valid_o,
+	input logic next_relay_ready_i,
+	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] next_relay_control_o,
+	output logic [127:0] next_relay_data_o,
+	output logic [3:0] next_relay_strb_o,
+	output logic [1:0] next_relay_scope_o,
+	output logic [11:0] next_relay_destination_o,
+	output logic [16:0] next_relay_imem_address_o,
+	output logic next_relay_last_o,
 
 	output logic [$clog2(BUFFER_DEPTH+1)-1:0] level_o,
 	output logic idle_o,
@@ -69,7 +69,7 @@ module lpu_program_distribute_relay #(
 	logic [PTR_WIDTH-1:0] write_ptr_q;
 	logic [PTR_WIDTH-1:0] read_ptr_q;
 	logic [LEVEL_WIDTH-1:0] level_q;
-	logic [RECORD_WIDTH-1:0] input_record_w;
+	logic [RECORD_WIDTH-1:0] chain_record_record_w;
 	logic [RECORD_WIDTH-1:0] head_record_w;
 
 	logic head_valid_w;
@@ -82,19 +82,19 @@ module lpu_program_distribute_relay #(
 	logic head_last_w;
 	logic [2:0] head_target_kind_w;
 	logic [7:0] head_target_index_w;
-	logic [7:0] local_bank_offset_w;
+	logic [7:0] local_endpoint_bank_offset_w;
 
 	logic scope_invalid_w;
 	logic scope_mismatch_w;
 	logic hemisphere_mismatch_w;
-	logic local_route_w;
-	logic forward_mem_w;
-	logic forward_peripheral_w;
-	logic forward_route_w;
+	logic local_endpoint_route_w;
+	logic next_relay_mem_w;
+	logic next_relay_peripheral_w;
+	logic next_relay_route_w;
 	logic route_invalid_w;
 	logic enqueue_fire_w;
-	logic local_fire_w;
-	logic forward_fire_w;
+	logic local_endpoint_fire_w;
+	logic next_relay_fire_w;
 	logic dequeue_fire_w;
 	logic fault_q;
 
@@ -126,14 +126,14 @@ module lpu_program_distribute_relay #(
 		end
 	end
 
-	assign input_record_w = {
-		input_control_i,
-		input_data_i,
-		input_strb_i,
-		input_scope_i,
-		input_destination_i,
-		input_imem_address_i,
-		input_last_i
+	assign chain_record_record_w = {
+		chain_record_control_i,
+		chain_record_data_i,
+		chain_record_strb_i,
+		chain_record_scope_i,
+		chain_record_destination_i,
+		chain_record_imem_address_i,
+		chain_record_last_i
 	};
 	assign head_record_w = record_mem[read_ptr_q];
 	assign {
@@ -151,7 +151,7 @@ module lpu_program_distribute_relay #(
 		PROGRAM_DESTINATION_KIND_MSB:PROGRAM_DESTINATION_KIND_LSB];
 	assign head_target_index_w = head_destination_w[
 		PROGRAM_DESTINATION_INDEX_MSB:PROGRAM_DESTINATION_INDEX_LSB];
-	assign local_bank_offset_w = head_target_index_w - LOCAL_BANK_BASE;
+	assign local_endpoint_bank_offset_w = head_target_index_w - LOCAL_BANK_BASE;
 
 	// A concrete Hemisphere chain accepts BOTH as metadata but never duplicates the Record locally.
 	assign scope_invalid_w = (head_scope_w != PROGRAM_SCOPE_EAST) &&
@@ -163,49 +163,49 @@ module lpu_program_distribute_relay #(
 	assign hemisphere_mismatch_w = head_destination_w[PROGRAM_DESTINATION_HEMISPHERE_BIT] !=
 		RELAY_HEMISPHERE;
 
-	assign local_route_w = (head_target_kind_w == PROGRAM_TARGET_MEM) &&
+	assign local_endpoint_route_w = (head_target_kind_w == PROGRAM_TARGET_MEM) &&
 		(head_target_index_w >= LOCAL_BANK_BASE) && (head_target_index_w < LOCAL_BANK_END);
-	assign forward_mem_w = (head_target_kind_w == PROGRAM_TARGET_MEM) &&
+	assign next_relay_mem_w = (head_target_kind_w == PROGRAM_TARGET_MEM) &&
 		(head_target_index_w >= LOCAL_BANK_END) && (head_target_index_w < MEM_BANK_COUNT);
-	assign forward_peripheral_w = ((head_target_kind_w >= PROGRAM_TARGET_MXM_LOAD) &&
+	assign next_relay_peripheral_w = ((head_target_kind_w >= PROGRAM_TARGET_MXM_LOAD) &&
 		(head_target_kind_w <= PROGRAM_TARGET_MXM_COMPUTE)) ||
 		(head_target_kind_w == PROGRAM_TARGET_SXM_TRANSPOSE) ||
 		(head_target_kind_w == PROGRAM_TARGET_SXM_PERMUTE);
-	assign forward_route_w = !LAST_RELAY && (forward_mem_w || forward_peripheral_w);
+	assign next_relay_route_w = !LAST_RELAY && (next_relay_mem_w || next_relay_peripheral_w);
 	assign route_invalid_w = head_valid_w && (scope_invalid_w || scope_mismatch_w ||
-		hemisphere_mismatch_w || (!local_route_w && !forward_route_w));
+		hemisphere_mismatch_w || (!local_endpoint_route_w && !next_relay_route_w));
 
 	// Ready depends only on registered occupancy and local route validity, cutting downstream Ready chains.
-	assign input_ready_o = !fault_q && !route_invalid_w && (level_q < BUFFER_DEPTH);
-	assign enqueue_fire_w = input_valid_i && input_ready_o;
+	assign chain_record_ready_o = !fault_q && !route_invalid_w && (level_q < BUFFER_DEPTH);
+	assign enqueue_fire_w = chain_record_valid_i && chain_record_ready_o;
 
 	always_comb begin
-		local_valid_o = '0;
-		if(head_valid_w && local_route_w && !route_invalid_w && !fault_q)begin
-			local_valid_o[local_bank_offset_w] = 1'b1;
+		local_endpoint_valid_o = '0;
+		if(head_valid_w && local_endpoint_route_w && !route_invalid_w && !fault_q)begin
+			local_endpoint_valid_o[local_endpoint_bank_offset_w] = 1'b1;
 		end
 	end
 
-	assign local_fire_w = |(local_valid_o & local_ready_i);
-	assign forward_valid_o = head_valid_w && forward_route_w && !route_invalid_w && !fault_q;
-	assign forward_fire_w = forward_valid_o && forward_ready_i;
-	assign dequeue_fire_w = local_fire_w || forward_fire_w || route_invalid_w;
+	assign local_endpoint_fire_w = |(local_endpoint_valid_o & local_endpoint_ready_i);
+	assign next_relay_valid_o = head_valid_w && next_relay_route_w && !route_invalid_w && !fault_q;
+	assign next_relay_fire_w = next_relay_valid_o && next_relay_ready_i;
+	assign dequeue_fire_w = local_endpoint_fire_w || next_relay_fire_w || route_invalid_w;
 
-	assign local_control_o = head_control_w;
-	assign local_data_o = head_data_w;
-	assign local_strb_o = head_strb_w;
-	assign local_scope_o = head_scope_w;
-	assign local_destination_o = head_destination_w;
-	assign local_imem_address_o = head_imem_address_w;
-	assign local_last_o = head_last_w;
+	assign local_endpoint_control_o = head_control_w;
+	assign local_endpoint_data_o = head_data_w;
+	assign local_endpoint_strb_o = head_strb_w;
+	assign local_endpoint_scope_o = head_scope_w;
+	assign local_endpoint_destination_o = head_destination_w;
+	assign local_endpoint_imem_address_o = head_imem_address_w;
+	assign local_endpoint_last_o = head_last_w;
 
-	assign forward_control_o = head_control_w;
-	assign forward_data_o = head_data_w;
-	assign forward_strb_o = head_strb_w;
-	assign forward_scope_o = head_scope_w;
-	assign forward_destination_o = head_destination_w;
-	assign forward_imem_address_o = head_imem_address_w;
-	assign forward_last_o = head_last_w;
+	assign next_relay_control_o = head_control_w;
+	assign next_relay_data_o = head_data_w;
+	assign next_relay_strb_o = head_strb_w;
+	assign next_relay_scope_o = head_scope_w;
+	assign next_relay_destination_o = head_destination_w;
+	assign next_relay_imem_address_o = head_imem_address_w;
+	assign next_relay_last_o = head_last_w;
 
 	assign level_o = level_q;
 	assign idle_o = level_q == 0;
@@ -216,7 +216,7 @@ module lpu_program_distribute_relay #(
 	always_ff @(posedge clk_i) begin
 		if(rst_ni)begin
 			if(enqueue_fire_w)begin
-				record_mem[write_ptr_q] <= input_record_w;
+				record_mem[write_ptr_q] <= chain_record_record_w;
 			end
 		end
 	end
