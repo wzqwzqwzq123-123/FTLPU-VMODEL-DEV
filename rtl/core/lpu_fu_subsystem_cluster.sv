@@ -125,6 +125,8 @@ module lpu_fu_subsystem_cluster #(
 	localparam integer QCTL_MXM_LOAD_BASE = lpu_pkg::MEM_BANK_COUNT;
 	localparam integer QCTL_MXM_DEQUANT_BASE = QCTL_MXM_LOAD_BASE + 4;
 	localparam integer QCTL_MXM_COMPUTE_BASE = QCTL_MXM_DEQUANT_BASE + 4;
+	localparam integer PROGRAM_RELAY_COUNT = lpu_program_load_pkg::PROGRAM_RELAY_COUNT;
+	localparam integer PROGRAM_RELAY_PORT_COUNT = lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT;
 	logic started_q;
 	logic [31:0] schedule_cycle_q;
 	logic execution_run;
@@ -132,15 +134,15 @@ module lpu_fu_subsystem_cluster #(
 	logic program_distribution_fault;
 	logic [5:0] program_distribution_fault_code;
 
-	logic [1:0] mem_program_valid;
-	logic [1:0] mem_program_ready;
-	logic [1:0] mem_program_error;
-	logic [2*PROGRAM_LOAD_CONTROL_WIDTH-1:0] mem_program_control;
-	logic [23:0] mem_program_destination;
-	logic [33:0] mem_program_address;
-	logic [255:0] mem_program_data;
-	logic [7:0] mem_program_strb;
-	logic [1:0] mem_program_last;
+	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_valid;
+	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_ready;
+	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_error;
+	logic [PROGRAM_RELAY_PORT_COUNT*PROGRAM_LOAD_CONTROL_WIDTH-1:0] mem_program_control;
+	logic [PROGRAM_RELAY_PORT_COUNT*PROGRAM_DESTINATION_WIDTH-1:0] mem_program_destination;
+	logic [PROGRAM_RELAY_PORT_COUNT*17-1:0] mem_program_address;
+	logic [PROGRAM_RELAY_PORT_COUNT*128-1:0] mem_program_data;
+	logic [PROGRAM_RELAY_PORT_COUNT*4-1:0] mem_program_strb;
+	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_last;
 	logic [1:0] mem_frontends_ready;
 	logic [1:0] mem_frontends_idle;
 	logic [1:0] mem_frontend_fault;
@@ -270,7 +272,7 @@ module lpu_fu_subsystem_cluster #(
 	assign load_distribute_fault_o = program_distribution_fault;
 	assign load_distribute_fault_code_o = program_distribution_fault_code;
 
-	lpu_load_distribute_system u_load_distribute_system (
+	lpu_program_distribute_system u_load_distribute_system (
 		.clk_i,
 		.rst_ni,
 		.program_reset_i,
@@ -383,17 +385,26 @@ module lpu_fu_subsystem_cluster #(
 				.qctl_schedule_cycle_i(qctl_queue_cycle[
 					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE*32+:
 					lpu_pkg::MEM_BANKS_PER_HEMISPHERE*32]),
-				.program_valid_i(mem_program_valid[HEMISPHERE_INDEX]),
-				.program_ready_o(mem_program_ready[HEMISPHERE_INDEX]),
+				.program_valid_i(mem_program_valid[
+					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT+:PROGRAM_RELAY_COUNT]),
+				.program_ready_o(mem_program_ready[
+					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT+:PROGRAM_RELAY_COUNT]),
 				.program_control_i(mem_program_control[
-					HEMISPHERE_INDEX*PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH]),
+					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT*PROGRAM_LOAD_CONTROL_WIDTH+:
+					PROGRAM_RELAY_COUNT*PROGRAM_LOAD_CONTROL_WIDTH]),
 				.program_destination_i(mem_program_destination[
-					HEMISPHERE_INDEX*PROGRAM_DESTINATION_WIDTH+:PROGRAM_DESTINATION_WIDTH]),
-				.program_address_i(mem_program_address[HEMISPHERE_INDEX*17+:17]),
-				.program_data_i(mem_program_data[HEMISPHERE_INDEX*128+:128]),
-				.program_strb_i(mem_program_strb[HEMISPHERE_INDEX*4+:4]),
-				.program_last_i(mem_program_last[HEMISPHERE_INDEX]),
-				.program_error_o(mem_program_error[HEMISPHERE_INDEX]),
+					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT*PROGRAM_DESTINATION_WIDTH+:
+					PROGRAM_RELAY_COUNT*PROGRAM_DESTINATION_WIDTH]),
+				.program_address_i(mem_program_address[
+					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT*17+:PROGRAM_RELAY_COUNT*17]),
+				.program_data_i(mem_program_data[
+					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT*128+:PROGRAM_RELAY_COUNT*128]),
+				.program_strb_i(mem_program_strb[
+					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT*4+:PROGRAM_RELAY_COUNT*4]),
+				.program_last_i(mem_program_last[
+					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT+:PROGRAM_RELAY_COUNT]),
+				.program_error_o(mem_program_error[
+					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT+:PROGRAM_RELAY_COUNT]),
 				.external_issue_valid_i(external_mem_issue_valid_i[
 					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
 				.external_issue_ready_o(external_mem_issue_ready_o[

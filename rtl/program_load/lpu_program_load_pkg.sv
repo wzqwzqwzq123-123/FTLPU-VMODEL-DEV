@@ -15,6 +15,20 @@ package lpu_program_load_pkg;
 	parameter integer PROGRAM_LOADER_OPCODE_WIDTH = 3;
 	parameter integer PROGRAM_FAULT_CODE_WIDTH = 6;
 
+	// Program Distribution maps two MEM Groups to one physical Relay stage.
+	// The final Relay may own fewer Banks when the Hemisphere has a partial Group.
+	parameter integer PROGRAM_RELAY_MEM_SLICES_PER_GROUP = 4;
+	parameter integer PROGRAM_RELAY_MEM_GROUPS_PER_STAGE = 2;
+	parameter integer PROGRAM_RELAY_MEM_GROUP_COUNT =
+		(lpu_pkg::MEM_SLICES_PER_HEMISPHERE + PROGRAM_RELAY_MEM_SLICES_PER_GROUP - 1) /
+		PROGRAM_RELAY_MEM_SLICES_PER_GROUP;
+	parameter integer PROGRAM_RELAY_BANKS_PER_STAGE = PROGRAM_RELAY_MEM_SLICES_PER_GROUP *
+		lpu_pkg::MEM_BANKS_PER_SLICE * PROGRAM_RELAY_MEM_GROUPS_PER_STAGE;
+	parameter integer PROGRAM_RELAY_COUNT =
+		(PROGRAM_RELAY_MEM_GROUP_COUNT + PROGRAM_RELAY_MEM_GROUPS_PER_STAGE - 1) /
+		PROGRAM_RELAY_MEM_GROUPS_PER_STAGE;
+	parameter integer PROGRAM_RELAY_PORT_COUNT = lpu_pkg::HEMISPHERES * PROGRAM_RELAY_COUNT;
+
 	// Program Word transport is always 128 bits. Each strobe bit enables one 32-bit segment.
 	typedef enum logic [PROGRAM_FORMAT_WIDTH-1:0] {
 		PROGRAM_FORMAT_96 = 2'd0,

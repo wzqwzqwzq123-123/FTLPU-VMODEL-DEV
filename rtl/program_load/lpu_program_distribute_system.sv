@@ -15,15 +15,19 @@ module lpu_program_distribute_system (
 	input logic [16:0] load_distribute_imem_address_i,
 	input logic load_distribute_last_i,
 
-	output logic [1:0] mem_program_valid_o,
-	input logic [1:0] mem_program_ready_i,
-	output logic [2*lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] mem_program_control_o,
-	output logic [23:0] mem_program_destination_o,
-	output logic [33:0] mem_program_address_o,
-	output logic [255:0] mem_program_data_o,
-	output logic [7:0] mem_program_strb_o,
-	output logic [1:0] mem_program_last_o,
-	input logic [1:0] mem_program_error_i,
+	output logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_valid_o,
+	input logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_ready_i,
+	output logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*
+		lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] mem_program_control_o,
+	output logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*12-1:0]
+		mem_program_destination_o,
+	output logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*17-1:0]
+		mem_program_address_o,
+	output logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*128-1:0]
+		mem_program_data_o,
+	output logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*4-1:0] mem_program_strb_o,
+	output logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_last_o,
+	input logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_error_i,
 
 	output logic [3:0] mxm_program_valid_o,
 	input logic [3:0] mxm_program_ready_i,
@@ -56,30 +60,22 @@ module lpu_program_distribute_system (
 
 	localparam logic [5:0] FAULT_NONE = 6'd0;
 	localparam logic [5:0] FAULT_ROUTE = 6'd1;
-	localparam integer PROGRAM_RELAY_GROUP_SLICES = 4;
-	localparam integer PROGRAM_RELAY_GROUPS_PER_STAGE = 2;
-	localparam integer PROGRAM_RELAY_BANKS_PER_STAGE =
-		PROGRAM_RELAY_GROUP_SLICES * lpu_pkg::MEM_BANKS_PER_SLICE *
-		PROGRAM_RELAY_GROUPS_PER_STAGE;
-	localparam integer PROGRAM_RELAY_COUNT =
-		((lpu_pkg::MEM_SLICES_PER_HEMISPHERE + PROGRAM_RELAY_GROUP_SLICES - 1) /
-		 PROGRAM_RELAY_GROUP_SLICES + PROGRAM_RELAY_GROUPS_PER_STAGE - 1) /
-		PROGRAM_RELAY_GROUPS_PER_STAGE;
-	localparam integer PROGRAM_RELAY_SOURCE_COUNT = PROGRAM_RELAY_COUNT + 1;
-	localparam integer PROGRAM_RELAY_SOURCE_WIDTH = $clog2(PROGRAM_RELAY_SOURCE_COUNT);
+	localparam integer PROGRAM_COMPLETION_SOURCE_COUNT = PROGRAM_RELAY_PORT_COUNT + 3;
 
 	logic program_transport_rst_ni;
 	logic route_fault_q;
-	logic [1:0] selected_ready_w;
-	logic [1:0] selected_valid_w;
 	logic [1:0] destination_hemisphere_match_w;
 	logic [5:0] destination_target_kind_w;
 	logic [15:0] destination_target_index_w;
-	logic [1:0] write_fire_w;
-	logic [1:0] write_error_w;
+	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_write_fire_w;
+	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_write_error_w;
+	logic [1:0] outer_write_fire_w;
+	logic [1:0] outer_write_error_w;
+	logic vxm_write_fire_w;
+	logic vxm_write_error_w;
+	logic [1:0] invalid_write_error_w;
 	logic [1:0] route_error_fire_w;
-	logic [1:0] completion_slot_ready_w;
-	logic [1:0] commit_valid_q;
+	logic [PROGRAM_COMPLETION_SOURCE_COUNT-1:0] commit_valid_q;
 	logic distributor_idle;
 	logic distributor_fault;
 	logic [5:0] distributor_fault_code;
@@ -93,15 +89,15 @@ module lpu_program_distribute_system (
 	logic [33:0] endpoint_load_imem_address;
 	logic [1:0] endpoint_load_last;
 
-	logic [1:0] mem_program_valid;
-	logic [1:0] mem_program_ready;
-	logic [1:0] mem_program_error;
-	logic [2*PROGRAM_LOAD_CONTROL_WIDTH-1:0] mem_program_control;
-	logic [23:0] mem_program_destination;
-	logic [33:0] mem_program_address;
-	logic [255:0] mem_program_data;
-	logic [7:0] mem_program_strb;
-	logic [1:0] mem_program_last;
+	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_valid;
+	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_ready;
+	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_error;
+	logic [PROGRAM_RELAY_PORT_COUNT*PROGRAM_LOAD_CONTROL_WIDTH-1:0] mem_program_control;
+	logic [PROGRAM_RELAY_PORT_COUNT*12-1:0] mem_program_destination;
+	logic [PROGRAM_RELAY_PORT_COUNT*17-1:0] mem_program_address;
+	logic [PROGRAM_RELAY_PORT_COUNT*128-1:0] mem_program_data;
+	logic [PROGRAM_RELAY_PORT_COUNT*4-1:0] mem_program_strb;
+	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_last;
 	logic [3:0] mxm_program_valid;
 	logic [3:0] mxm_program_ready;
 	logic [3:0] mxm_program_error;
@@ -147,11 +143,14 @@ module lpu_program_distribute_system (
 	logic [1:0] relay_chain_idle;
 	logic [1:0] relay_chain_fault;
 	logic [11:0] relay_chain_fault_code;
-	logic [2*PROGRAM_RELAY_SOURCE_COUNT-1:0] relay_source_valid_w;
-	logic [1:0] relay_source_selected_w;
-	logic [2*PROGRAM_RELAY_SOURCE_WIDTH-1:0] relay_source_index_w;
-	logic [2*PROGRAM_RELAY_SOURCE_WIDTH-1:0] relay_round_robin_q;
-	logic [1:0] relay_source_fire_w;
+	logic [1:0] endpoint_route_valid_w;
+	logic [1:0] endpoint_vxm_route_w;
+	logic [1:0] endpoint_chain_route_w;
+	logic [1:0] outer_endpoint_fire_w;
+	logic [5:0] outer_target_kind_w;
+	logic [15:0] outer_target_index_w;
+	logic [1:0] outer_mxm_route_w;
+	logic [1:0] outer_sxm_route_w;
 
 	assign program_transport_rst_ni = rst_ni && !program_reset_i;
 	assign mem_program_ready = mem_program_ready_i;
@@ -248,9 +247,9 @@ module lpu_program_distribute_system (
 			lpu_program_distribute_relay_chain #(
 				.HEMISPHERE_ID(chain_gen),
 				.MEM_SLICES_PER_HEMISPHERE(lpu_pkg::MEM_SLICES_PER_HEMISPHERE),
-				.MEM_SLICES_PER_GROUP(PROGRAM_RELAY_GROUP_SLICES),
+				.MEM_SLICES_PER_GROUP(PROGRAM_RELAY_MEM_SLICES_PER_GROUP),
 				.BANKS_PER_SLICE(lpu_pkg::MEM_BANKS_PER_SLICE),
-				.MEM_GROUPS_PER_RELAY(PROGRAM_RELAY_GROUPS_PER_STAGE),
+				.MEM_GROUPS_PER_RELAY(PROGRAM_RELAY_MEM_GROUPS_PER_STAGE),
 				.MXM_INSTANCES_PER_HEMISPHERE(2),
 				.SXM_INSTANCES_PER_HEMISPHERE(1)
 			) u_program_relay_chain (
@@ -305,295 +304,192 @@ module lpu_program_distribute_system (
 		end
 	endgenerate
 
-	// The chains can hold Local requests at different physical stages. A small
-	// round-robin selector preserves the existing single Program port on each FU
-	// Subsystem while guaranteeing that no Relay stage can starve indefinitely.
+	// Decode the destination class once. Bank ownership is checked again at the
+	// Relay and MEM Subsystem boundaries.
 	always_comb begin
-		endpoint_load_ready = '0;
-		selected_ready_w = '0;
-		selected_valid_w = '0;
-		write_fire_w = '0;
-		write_error_w = '0;
-		route_error_fire_w = '0;
-		completion_slot_ready_w = '0;
-		relay_chain_input_valid = '0;
-		relay_mem_ready = '0;
-		relay_outer_ready = '0;
-		relay_source_valid_w = '0;
-		relay_source_selected_w = '0;
-		relay_source_index_w = '0;
-		relay_source_fire_w = '0;
-		mem_program_valid = '0;
-		mem_program_control = '0;
-		mem_program_destination = '0;
-		mem_program_address = '0;
-		mem_program_data = '0;
-		mem_program_strb = '0;
-		mem_program_last = '0;
-		mxm_program_valid = '0;
-		sxm_program_valid = '0;
-		vxm_program_valid = 1'b0;
-		vxm_program_control = '0;
-		vxm_program_destination = '0;
-		vxm_program_address = '0;
-		vxm_program_data = '0;
-		vxm_program_strb = '0;
-		vxm_program_last = 1'b0;
-		outer_program_control = '0;
-		outer_program_destination = '0;
-		outer_program_address = '0;
-		outer_program_data = '0;
-		outer_program_strb = '0;
-		outer_program_last = '0;
-
+		endpoint_route_valid_w = '0;
 		for(integer hemisphere = 0; hemisphere < 2; hemisphere = hemisphere + 1)begin
-			integer selected_source;
-			integer candidate_source;
-			integer selected_bank;
-			logic [2:0] endpoint_kind;
-			logic [7:0] endpoint_index;
-			logic [2:0] selected_outer_kind;
-			logic [7:0] selected_outer_index;
-			logic selected_control;
-			logic selected_can_complete;
-
-			completion_slot_ready_w[hemisphere] = 1'b1;
-
-			for(integer local_bank = 0;
-				local_bank < lpu_pkg::MEM_BANKS_PER_HEMISPHERE;
-				local_bank = local_bank + 1)begin
-				relay_source_valid_w[hemisphere*PROGRAM_RELAY_SOURCE_COUNT+
-					(local_bank / PROGRAM_RELAY_BANKS_PER_STAGE)] |=
-					relay_mem_valid[hemisphere*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+local_bank];
-			end
-			relay_source_valid_w[hemisphere*PROGRAM_RELAY_SOURCE_COUNT+
-				PROGRAM_RELAY_COUNT] = relay_outer_valid[hemisphere];
-
-			selected_source = 0;
-			for(integer source_offset = 0; source_offset < PROGRAM_RELAY_SOURCE_COUNT;
-				source_offset = source_offset + 1)begin
-				candidate_source = relay_round_robin_q[
-					hemisphere*PROGRAM_RELAY_SOURCE_WIDTH+:PROGRAM_RELAY_SOURCE_WIDTH] +
-					source_offset;
-				if(candidate_source >= PROGRAM_RELAY_SOURCE_COUNT)begin
-					candidate_source = candidate_source - PROGRAM_RELAY_SOURCE_COUNT;
-				end
-				if(!relay_source_selected_w[hemisphere] && relay_source_valid_w[
-					hemisphere*PROGRAM_RELAY_SOURCE_COUNT+candidate_source])begin
-					relay_source_selected_w[hemisphere] = 1'b1;
-					selected_source = candidate_source;
-					relay_source_index_w[hemisphere*PROGRAM_RELAY_SOURCE_WIDTH+:
-						PROGRAM_RELAY_SOURCE_WIDTH] = candidate_source[PROGRAM_RELAY_SOURCE_WIDTH-1:0];
-				end
-			end
-
-			endpoint_kind = destination_target_kind_w[
-				hemisphere*PROGRAM_TARGET_KIND_WIDTH+:PROGRAM_TARGET_KIND_WIDTH];
-			endpoint_index = destination_target_index_w[
-				hemisphere*PROGRAM_TARGET_INDEX_WIDTH+:PROGRAM_TARGET_INDEX_WIDTH];
-			case(endpoint_kind)
-				PROGRAM_TARGET_MEM: selected_valid_w[hemisphere] =
+			case(destination_target_kind_w[
+				hemisphere*PROGRAM_TARGET_KIND_WIDTH+:PROGRAM_TARGET_KIND_WIDTH])
+				PROGRAM_TARGET_MEM: endpoint_route_valid_w[hemisphere] =
 					destination_hemisphere_match_w[hemisphere] &&
-					(endpoint_index < lpu_pkg::MEM_BANKS_PER_HEMISPHERE);
+					(destination_target_index_w[
+					 hemisphere*PROGRAM_TARGET_INDEX_WIDTH+:PROGRAM_TARGET_INDEX_WIDTH] <
+					 lpu_pkg::MEM_BANKS_PER_HEMISPHERE);
 				PROGRAM_TARGET_MXM_LOAD,
 				PROGRAM_TARGET_MXM_DEQUANT,
-				PROGRAM_TARGET_MXM_COMPUTE: selected_valid_w[hemisphere] =
-					destination_hemisphere_match_w[hemisphere] && (endpoint_index < 2);
+				PROGRAM_TARGET_MXM_COMPUTE: endpoint_route_valid_w[hemisphere] =
+					destination_hemisphere_match_w[hemisphere] &&
+					(destination_target_index_w[
+					 hemisphere*PROGRAM_TARGET_INDEX_WIDTH+:PROGRAM_TARGET_INDEX_WIDTH] < 2);
 				PROGRAM_TARGET_SXM_TRANSPOSE,
-				PROGRAM_TARGET_SXM_PERMUTE: selected_valid_w[hemisphere] =
-					destination_hemisphere_match_w[hemisphere] && (endpoint_index == 0);
-				PROGRAM_TARGET_VXM: selected_valid_w[hemisphere] =
+				PROGRAM_TARGET_SXM_PERMUTE: endpoint_route_valid_w[hemisphere] =
+					destination_hemisphere_match_w[hemisphere] &&
+					(destination_target_index_w[
+					 hemisphere*PROGRAM_TARGET_INDEX_WIDTH+:PROGRAM_TARGET_INDEX_WIDTH] == 0);
+				PROGRAM_TARGET_VXM: endpoint_route_valid_w[hemisphere] =
 					(hemisphere == 0) && destination_hemisphere_match_w[hemisphere] &&
-					(endpoint_index <= 8);
-				default: selected_valid_w[hemisphere] = 1'b0;
+					(destination_target_index_w[
+					 hemisphere*PROGRAM_TARGET_INDEX_WIDTH+:PROGRAM_TARGET_INDEX_WIDTH] <= 8);
+				default: endpoint_route_valid_w[hemisphere] = 1'b0;
 			endcase
-
-			if(!selected_valid_w[hemisphere])begin
-				selected_ready_w[hemisphere] =
-					(endpoint_load_control[hemisphere] != PROGRAM_LOAD_WRITE) ||
-					completion_slot_ready_w[hemisphere];
-			end
-			else if(endpoint_kind == PROGRAM_TARGET_VXM)begin
-				// The shared VXM bypasses both Relay chains. The Subsystem boundary
-				// currently holds Ready low until its resident-config adapter exists.
-				selected_can_complete =
-					(endpoint_load_control[hemisphere] != PROGRAM_LOAD_WRITE) ||
-					completion_slot_ready_w[hemisphere];
-				vxm_program_valid = endpoint_load_valid[hemisphere] && selected_can_complete;
-				vxm_program_control = endpoint_load_control[
-					hemisphere*PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH];
-				vxm_program_destination = endpoint_load_destination[hemisphere*12+:12];
-				vxm_program_address = endpoint_load_imem_address[hemisphere*17+:17];
-				vxm_program_data = endpoint_load_data[hemisphere*128+:128];
-				vxm_program_strb = endpoint_load_strb[hemisphere*4+:4];
-				vxm_program_last = endpoint_load_last[hemisphere];
-				selected_ready_w[hemisphere] = vxm_program_ready && selected_can_complete;
-				if(vxm_program_valid && vxm_program_ready &&
-					(endpoint_load_control[hemisphere] == PROGRAM_LOAD_WRITE))begin
-					write_fire_w[hemisphere] = 1'b1;
-					write_error_w[hemisphere] = vxm_program_error;
-				end
-			end
-			else begin
-				// SXM requests enter the physical Relay chain and remain stalled at
-				// R6 until the Subsystem exposes a real local-iMEM receiver.
-				selected_ready_w[hemisphere] = relay_chain_input_ready[hemisphere];
-				relay_chain_input_valid[hemisphere] = endpoint_load_valid[hemisphere];
-			end
-			endpoint_load_ready[hemisphere] = selected_ready_w[hemisphere];
-
-			if(endpoint_load_valid[hemisphere] && endpoint_load_ready[hemisphere] &&
-				!selected_valid_w[hemisphere])begin
-				if(endpoint_load_control[hemisphere] == PROGRAM_LOAD_WRITE)begin
-					write_fire_w[hemisphere] = 1'b1;
-					write_error_w[hemisphere] = 1'b1;
-				end
-				else begin
-					route_error_fire_w[hemisphere] = 1'b1;
-				end
-			end
-			if(endpoint_load_valid[hemisphere] && endpoint_load_ready[hemisphere] &&
-				(endpoint_load_control[hemisphere] == PROGRAM_LOAD_PRIME) &&
-				((endpoint_load_data[hemisphere*128+:128] != '0) ||
-				 (endpoint_load_strb[hemisphere*4+:4] != '0)))begin
-				route_error_fire_w[hemisphere] = 1'b1;
-			end
-
-			if(relay_source_selected_w[hemisphere] &&
-				(selected_source < PROGRAM_RELAY_COUNT))begin
-				selected_control = relay_mem_control[
-					(hemisphere*PROGRAM_RELAY_COUNT+selected_source)*PROGRAM_LOAD_CONTROL_WIDTH+:
-					PROGRAM_LOAD_CONTROL_WIDTH];
-				selected_can_complete = (selected_control != PROGRAM_LOAD_WRITE) ||
-					completion_slot_ready_w[hemisphere];
-				mem_program_control[hemisphere*PROGRAM_LOAD_CONTROL_WIDTH+:
-					PROGRAM_LOAD_CONTROL_WIDTH] = selected_control;
-				mem_program_destination[hemisphere*12+:12] = relay_mem_destination[
-					(hemisphere*PROGRAM_RELAY_COUNT+selected_source)*12+:12];
-				mem_program_address[hemisphere*17+:17] = relay_mem_address[
-					(hemisphere*PROGRAM_RELAY_COUNT+selected_source)*17+:17];
-				mem_program_data[hemisphere*128+:128] = relay_mem_data[
-					(hemisphere*PROGRAM_RELAY_COUNT+selected_source)*128+:128];
-				mem_program_strb[hemisphere*4+:4] = relay_mem_strb[
-					(hemisphere*PROGRAM_RELAY_COUNT+selected_source)*4+:4];
-				mem_program_last[hemisphere] = relay_mem_last[
-					hemisphere*PROGRAM_RELAY_COUNT+selected_source];
-				selected_bank = mem_program_destination[hemisphere*12+
-					PROGRAM_DESTINATION_INDEX_LSB+:PROGRAM_TARGET_INDEX_WIDTH];
-				mem_program_valid[hemisphere] = selected_can_complete;
-				relay_mem_ready[hemisphere*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+
-					selected_bank] = mem_program_ready[hemisphere] && selected_can_complete;
-				relay_source_fire_w[hemisphere] = mem_program_valid[hemisphere] &&
-					mem_program_ready[hemisphere];
-				if(relay_source_fire_w[hemisphere] &&
-					(selected_control == PROGRAM_LOAD_WRITE))begin
-					write_fire_w[hemisphere] = 1'b1;
-					write_error_w[hemisphere] = mem_program_error[hemisphere];
-				end
-			end
-			else if(relay_source_selected_w[hemisphere])begin
-				selected_outer_kind = relay_outer_destination[
-					hemisphere*12+PROGRAM_DESTINATION_KIND_LSB+:PROGRAM_TARGET_KIND_WIDTH];
-				selected_outer_index = relay_outer_destination[
-					hemisphere*12+PROGRAM_DESTINATION_INDEX_LSB+:PROGRAM_TARGET_INDEX_WIDTH];
-				selected_control = relay_outer_control[
-					hemisphere*PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH];
-				selected_can_complete = (selected_control != PROGRAM_LOAD_WRITE) ||
-					completion_slot_ready_w[hemisphere];
-				outer_program_control[hemisphere*PROGRAM_LOAD_CONTROL_WIDTH+:
-					PROGRAM_LOAD_CONTROL_WIDTH] = selected_control;
-				outer_program_destination[hemisphere*12+:12] =
-					relay_outer_destination[hemisphere*12+:12];
-				outer_program_address[hemisphere*17+:17] =
-					relay_outer_address[hemisphere*17+:17];
-				outer_program_data[hemisphere*128+:128] =
-					relay_outer_data[hemisphere*128+:128];
-				outer_program_strb[hemisphere*4+:4] = relay_outer_strb[hemisphere*4+:4];
-				outer_program_last[hemisphere] = relay_outer_last[hemisphere];
-
-				if((selected_outer_kind >= PROGRAM_TARGET_MXM_LOAD) &&
-					(selected_outer_kind <= PROGRAM_TARGET_MXM_COMPUTE) &&
-					(selected_outer_index < 2))begin
-					mxm_program_valid[hemisphere*2+selected_outer_index] =
-						relay_outer_valid[hemisphere] && selected_can_complete;
-					relay_outer_ready[hemisphere] =
-						mxm_program_ready[hemisphere*2+selected_outer_index] &&
-						selected_can_complete;
-					relay_source_fire_w[hemisphere] = relay_outer_valid[hemisphere] &&
-						relay_outer_ready[hemisphere];
-					if(relay_source_fire_w[hemisphere] &&
-						(selected_control == PROGRAM_LOAD_WRITE))begin
-						write_fire_w[hemisphere] = 1'b1;
-						write_error_w[hemisphere] =
-							mxm_program_error[hemisphere*2+selected_outer_index];
-					end
-				end
-				else if(((selected_outer_kind == PROGRAM_TARGET_SXM_TRANSPOSE) ||
-					(selected_outer_kind == PROGRAM_TARGET_SXM_PERMUTE)) &&
-					(selected_outer_index == 0))begin
-					sxm_program_valid[hemisphere] = relay_outer_valid[hemisphere] &&
-						selected_can_complete;
-					relay_outer_ready[hemisphere] = sxm_program_ready[hemisphere] &&
-						selected_can_complete;
-					relay_source_fire_w[hemisphere] = relay_outer_valid[hemisphere] &&
-						relay_outer_ready[hemisphere];
-					if(relay_source_fire_w[hemisphere] &&
-						(selected_control == PROGRAM_LOAD_WRITE))begin
-						write_fire_w[hemisphere] = 1'b1;
-						write_error_w[hemisphere] = sxm_program_error[hemisphere];
-					end
-				end
-			end
 		end
 	end
 
-	// Retain each accepted WRITE for one cycle so Distribution cannot report
-	// idle on the same edge that an FU-local iMEM accepts the final Record.
+	// The direct VXM bypass and the two Relay-chain inputs have independent
+	// backpressure. Invalid destinations are consumed and converted into faults.
 	generate
-		for(genvar commit_gen = 0; commit_gen < 2; commit_gen = commit_gen + 1)begin : gen_commit
-			always_ff @(posedge clk_i or negedge rst_ni) begin
-				if(!rst_ni)begin
-					commit_valid_q[commit_gen] <= 1'b0;
-				end
-				else if(program_reset_i)begin
-					commit_valid_q[commit_gen] <= 1'b0;
-				end
-				else begin
-					commit_valid_q[commit_gen] <= write_fire_w[commit_gen];
-				end
+		for(genvar route_gen = 0; route_gen < 2; route_gen = route_gen + 1)begin : gen_endpoint_route
+			assign endpoint_vxm_route_w[route_gen] = endpoint_route_valid_w[route_gen] &&
+				(destination_target_kind_w[route_gen*PROGRAM_TARGET_KIND_WIDTH+:
+				 PROGRAM_TARGET_KIND_WIDTH] == PROGRAM_TARGET_VXM);
+			assign endpoint_chain_route_w[route_gen] = endpoint_route_valid_w[route_gen] &&
+				!endpoint_vxm_route_w[route_gen];
+			assign relay_chain_input_valid[route_gen] =
+				endpoint_load_valid[route_gen] && endpoint_chain_route_w[route_gen];
+			assign endpoint_load_ready[route_gen] = !endpoint_route_valid_w[route_gen] ?
+				1'b1 : (endpoint_vxm_route_w[route_gen] ?
+				vxm_program_ready : relay_chain_input_ready[route_gen]);
+			assign invalid_write_error_w[route_gen] = endpoint_load_valid[route_gen] &&
+				endpoint_load_ready[route_gen] && !endpoint_route_valid_w[route_gen] &&
+				(endpoint_load_control[route_gen*PROGRAM_LOAD_CONTROL_WIDTH+:
+				 PROGRAM_LOAD_CONTROL_WIDTH] == PROGRAM_LOAD_WRITE);
+			assign route_error_fire_w[route_gen] = endpoint_load_valid[route_gen] &&
+				endpoint_load_ready[route_gen] &&
+				((!endpoint_route_valid_w[route_gen] &&
+				  (endpoint_load_control[route_gen*PROGRAM_LOAD_CONTROL_WIDTH+:
+				   PROGRAM_LOAD_CONTROL_WIDTH] != PROGRAM_LOAD_WRITE)) ||
+				 ((endpoint_load_control[route_gen*PROGRAM_LOAD_CONTROL_WIDTH+:
+				   PROGRAM_LOAD_CONTROL_WIDTH] == PROGRAM_LOAD_PRIME) &&
+				  ((endpoint_load_data[route_gen*128+:128] != '0) ||
+				   (endpoint_load_strb[route_gen*4+:4] != '0))));
+		end
+	endgenerate
+
+	assign vxm_program_valid = endpoint_load_valid[0] && endpoint_vxm_route_w[0];
+	assign vxm_program_control = endpoint_load_control[0+:PROGRAM_LOAD_CONTROL_WIDTH];
+	assign vxm_program_destination = endpoint_load_destination[0+:PROGRAM_DESTINATION_WIDTH];
+	assign vxm_program_address = endpoint_load_imem_address[0+:17];
+	assign vxm_program_data = endpoint_load_data[0+:128];
+	assign vxm_program_strb = endpoint_load_strb[0+:4];
+	assign vxm_program_last = endpoint_load_last[0];
+	assign vxm_write_fire_w = vxm_program_valid && vxm_program_ready &&
+		(vxm_program_control == PROGRAM_LOAD_WRITE);
+	assign vxm_write_error_w = vxm_write_fire_w && vxm_program_error;
+
+	// Every Relay owns one Program port. Ready is replicated only inside that
+	// Relay's disjoint Bank range, whose local valid vector is one-hot.
+	generate
+		for(genvar mem_hemi_gen = 0; mem_hemi_gen < 2; mem_hemi_gen = mem_hemi_gen + 1)begin : gen_mem_hemisphere_ports
+			for(genvar relay_gen = 0; relay_gen < PROGRAM_RELAY_COUNT; relay_gen = relay_gen + 1)begin : gen_mem_relay_port
+				localparam integer PORT_INDEX = mem_hemi_gen * PROGRAM_RELAY_COUNT + relay_gen;
+				localparam integer LOCAL_BANK_BASE = relay_gen * PROGRAM_RELAY_BANKS_PER_STAGE;
+				localparam integer LOCAL_BANK_COUNT =
+					((lpu_pkg::MEM_BANKS_PER_HEMISPHERE - LOCAL_BANK_BASE) >
+					 PROGRAM_RELAY_BANKS_PER_STAGE) ? PROGRAM_RELAY_BANKS_PER_STAGE :
+					(lpu_pkg::MEM_BANKS_PER_HEMISPHERE - LOCAL_BANK_BASE);
+
+				assign mem_program_valid[PORT_INDEX] = |relay_mem_valid[
+					mem_hemi_gen*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+LOCAL_BANK_BASE+:
+					LOCAL_BANK_COUNT];
+				assign relay_mem_ready[
+					mem_hemi_gen*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+LOCAL_BANK_BASE+:
+					LOCAL_BANK_COUNT] = {LOCAL_BANK_COUNT{mem_program_ready[PORT_INDEX]}};
+				assign mem_program_control[PORT_INDEX*PROGRAM_LOAD_CONTROL_WIDTH+:
+					PROGRAM_LOAD_CONTROL_WIDTH] = relay_mem_control[
+					PORT_INDEX*PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH];
+				assign mem_program_destination[PORT_INDEX*12+:12] =
+					relay_mem_destination[PORT_INDEX*12+:12];
+				assign mem_program_address[PORT_INDEX*17+:17] = relay_mem_address[PORT_INDEX*17+:17];
+				assign mem_program_data[PORT_INDEX*128+:128] = relay_mem_data[PORT_INDEX*128+:128];
+				assign mem_program_strb[PORT_INDEX*4+:4] = relay_mem_strb[PORT_INDEX*4+:4];
+				assign mem_program_last[PORT_INDEX] = relay_mem_last[PORT_INDEX];
+				assign mem_write_fire_w[PORT_INDEX] = mem_program_valid[PORT_INDEX] &&
+					mem_program_ready[PORT_INDEX] &&
+					(mem_program_control[PORT_INDEX*PROGRAM_LOAD_CONTROL_WIDTH+:
+					 PROGRAM_LOAD_CONTROL_WIDTH] == PROGRAM_LOAD_WRITE);
+				assign mem_write_error_w[PORT_INDEX] = mem_write_fire_w[PORT_INDEX] &&
+					mem_program_error[PORT_INDEX];
 			end
 		end
 	endgenerate
 
-	// Advance only when the selected FU endpoint accepts the Record. This keeps
-	// all stalled Relay heads stable and prevents a busy near stage from starving R6.
+	// The terminal Outer port remains separate from all MEM local ports. Only
+	// the addressed MXM or SXM endpoint controls its Ready and Error.
 	generate
-		for(genvar relay_rr_gen = 0; relay_rr_gen < 2; relay_rr_gen = relay_rr_gen + 1)begin : gen_relay_round_robin
-			always_ff @(posedge clk_i or negedge rst_ni) begin
-				if(!rst_ni)begin
-					relay_round_robin_q[relay_rr_gen*PROGRAM_RELAY_SOURCE_WIDTH+:
-						PROGRAM_RELAY_SOURCE_WIDTH] <= '0;
-				end
-				else if(program_reset_i)begin
-					relay_round_robin_q[relay_rr_gen*PROGRAM_RELAY_SOURCE_WIDTH+:
-						PROGRAM_RELAY_SOURCE_WIDTH] <= '0;
-				end
-				else if(relay_source_fire_w[relay_rr_gen])begin
-					if(relay_source_index_w[relay_rr_gen*PROGRAM_RELAY_SOURCE_WIDTH+:
-						PROGRAM_RELAY_SOURCE_WIDTH] == PROGRAM_RELAY_SOURCE_COUNT - 1)begin
-						relay_round_robin_q[relay_rr_gen*PROGRAM_RELAY_SOURCE_WIDTH+:
-							PROGRAM_RELAY_SOURCE_WIDTH] <= '0;
-					end
-					else begin
-						relay_round_robin_q[relay_rr_gen*PROGRAM_RELAY_SOURCE_WIDTH+:
-							PROGRAM_RELAY_SOURCE_WIDTH] <=
-							relay_source_index_w[relay_rr_gen*PROGRAM_RELAY_SOURCE_WIDTH+:
-							PROGRAM_RELAY_SOURCE_WIDTH] + 1'b1;
-					end
-				end
-			end
+		for(genvar outer_gen = 0; outer_gen < 2; outer_gen = outer_gen + 1)begin : gen_outer_route
+			assign outer_target_kind_w[outer_gen*PROGRAM_TARGET_KIND_WIDTH+:
+				PROGRAM_TARGET_KIND_WIDTH] = relay_outer_destination[
+				outer_gen*PROGRAM_DESTINATION_WIDTH+PROGRAM_DESTINATION_KIND_LSB+:
+				PROGRAM_TARGET_KIND_WIDTH];
+			assign outer_target_index_w[outer_gen*PROGRAM_TARGET_INDEX_WIDTH+:
+				PROGRAM_TARGET_INDEX_WIDTH] = relay_outer_destination[
+				outer_gen*PROGRAM_DESTINATION_WIDTH+PROGRAM_DESTINATION_INDEX_LSB+:
+				PROGRAM_TARGET_INDEX_WIDTH];
+			assign outer_mxm_route_w[outer_gen] =
+				(outer_target_kind_w[outer_gen*PROGRAM_TARGET_KIND_WIDTH+:
+				 PROGRAM_TARGET_KIND_WIDTH] >= PROGRAM_TARGET_MXM_LOAD) &&
+				(outer_target_kind_w[outer_gen*PROGRAM_TARGET_KIND_WIDTH+:
+				 PROGRAM_TARGET_KIND_WIDTH] <= PROGRAM_TARGET_MXM_COMPUTE) &&
+				(outer_target_index_w[outer_gen*PROGRAM_TARGET_INDEX_WIDTH+:
+				 PROGRAM_TARGET_INDEX_WIDTH] < 2);
+			assign outer_sxm_route_w[outer_gen] =
+				((outer_target_kind_w[outer_gen*PROGRAM_TARGET_KIND_WIDTH+:
+				  PROGRAM_TARGET_KIND_WIDTH] == PROGRAM_TARGET_SXM_TRANSPOSE) ||
+				 (outer_target_kind_w[outer_gen*PROGRAM_TARGET_KIND_WIDTH+:
+				  PROGRAM_TARGET_KIND_WIDTH] == PROGRAM_TARGET_SXM_PERMUTE)) &&
+				(outer_target_index_w[outer_gen*PROGRAM_TARGET_INDEX_WIDTH+:
+				 PROGRAM_TARGET_INDEX_WIDTH] == 0);
+			assign mxm_program_valid[outer_gen*2] = relay_outer_valid[outer_gen] &&
+				outer_mxm_route_w[outer_gen] &&
+				(outer_target_index_w[outer_gen*PROGRAM_TARGET_INDEX_WIDTH+:
+				 PROGRAM_TARGET_INDEX_WIDTH] == 0);
+			assign mxm_program_valid[outer_gen*2+1] = relay_outer_valid[outer_gen] &&
+				outer_mxm_route_w[outer_gen] &&
+				(outer_target_index_w[outer_gen*PROGRAM_TARGET_INDEX_WIDTH+:
+				 PROGRAM_TARGET_INDEX_WIDTH] == 1);
+			assign sxm_program_valid[outer_gen] = relay_outer_valid[outer_gen] &&
+				outer_sxm_route_w[outer_gen];
+			assign relay_outer_ready[outer_gen] = outer_mxm_route_w[outer_gen] ?
+				((outer_target_index_w[outer_gen*PROGRAM_TARGET_INDEX_WIDTH+:
+				  PROGRAM_TARGET_INDEX_WIDTH] == 0) ? mxm_program_ready[outer_gen*2] :
+				 mxm_program_ready[outer_gen*2+1]) :
+				(outer_sxm_route_w[outer_gen] ? sxm_program_ready[outer_gen] : 1'b0);
+			assign outer_program_control[outer_gen*PROGRAM_LOAD_CONTROL_WIDTH+:
+				PROGRAM_LOAD_CONTROL_WIDTH] = relay_outer_control[
+				outer_gen*PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH];
+			assign outer_program_destination[outer_gen*12+:12] =
+				relay_outer_destination[outer_gen*12+:12];
+			assign outer_program_address[outer_gen*17+:17] = relay_outer_address[outer_gen*17+:17];
+			assign outer_program_data[outer_gen*128+:128] = relay_outer_data[outer_gen*128+:128];
+			assign outer_program_strb[outer_gen*4+:4] = relay_outer_strb[outer_gen*4+:4];
+			assign outer_program_last[outer_gen] = relay_outer_last[outer_gen];
+			assign outer_endpoint_fire_w[outer_gen] = relay_outer_valid[outer_gen] &&
+				relay_outer_ready[outer_gen];
+			assign outer_write_fire_w[outer_gen] = outer_endpoint_fire_w[outer_gen] &&
+				(relay_outer_control[outer_gen*PROGRAM_LOAD_CONTROL_WIDTH+:
+				 PROGRAM_LOAD_CONTROL_WIDTH] == PROGRAM_LOAD_WRITE);
+			assign outer_write_error_w[outer_gen] = outer_write_fire_w[outer_gen] &&
+				(outer_mxm_route_w[outer_gen] ?
+				 ((outer_target_index_w[outer_gen*PROGRAM_TARGET_INDEX_WIDTH+:
+				   PROGRAM_TARGET_INDEX_WIDTH] == 0) ? mxm_program_error[outer_gen*2] :
+				  mxm_program_error[outer_gen*2+1]) : sxm_program_error[outer_gen]);
 		end
 	endgenerate
+
+	// Each accepted WRITE source receives its own one-cycle completion token, so
+	// simultaneous Relay completions cannot collapse into one Hemisphere bit.
+	always_ff @(posedge clk_i or negedge rst_ni) begin
+		if(!rst_ni)begin
+			commit_valid_q <= '0;
+		end
+		else if(program_reset_i)begin
+			commit_valid_q <= '0;
+		end
+		else begin
+			commit_valid_q <= {vxm_write_fire_w, outer_write_fire_w, mem_write_fire_w};
+		end
+	end
 
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
@@ -602,7 +498,8 @@ module lpu_program_distribute_system (
 		else if(program_reset_i)begin
 			route_fault_q <= 1'b0;
 		end
-		else if(!route_fault_q && ((|write_error_w) || (|route_error_fire_w) ||
+		else if(!route_fault_q && ((|invalid_write_error_w) || (|route_error_fire_w) ||
+			(|mem_write_error_w) || (|outer_write_error_w) || vxm_write_error_w ||
 			(|relay_chain_fault)))begin
 			route_fault_q <= 1'b1;
 		end

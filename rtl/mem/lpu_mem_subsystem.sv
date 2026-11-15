@@ -3,6 +3,8 @@ module lpu_mem_subsystem #(
 	parameter integer IMEM_DEPTH = 131072,
 	parameter integer ACTIVE_CONTEXTS = 4,
 	parameter integer FU_QUEUE_DEPTH = 16,
+	parameter integer PROGRAM_PORT_COUNT = lpu_program_load_pkg::PROGRAM_RELAY_COUNT,
+	parameter integer PROGRAM_BANKS_PER_PORT = lpu_program_load_pkg::PROGRAM_RELAY_BANKS_PER_STAGE,
 	parameter integer DEPTH_ROWS = lpu_pkg::SRAM_DEPTH_ROWS,
 	parameter integer ACTIVE_COLUMNS = 52,
 	parameter bit USE_SRAM_MACRO = 1'b0,
@@ -18,15 +20,17 @@ module lpu_mem_subsystem #(
 	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_scheduler_enable_i,
 	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE*32-1:0] qctl_schedule_cycle_i,
 
-	input logic program_valid_i,
-	output logic program_ready_o,
-	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] program_control_i,
-	input logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0] program_destination_i,
-	input logic [16:0] program_address_i,
-	input logic [127:0] program_data_i,
-	input logic [3:0] program_strb_i,
-	input logic program_last_i,
-	output logic program_error_o,
+	input logic [PROGRAM_PORT_COUNT-1:0] program_valid_i,
+	output logic [PROGRAM_PORT_COUNT-1:0] program_ready_o,
+	input logic [PROGRAM_PORT_COUNT*lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0]
+		program_control_i,
+	input logic [PROGRAM_PORT_COUNT*lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		program_destination_i,
+	input logic [PROGRAM_PORT_COUNT*17-1:0] program_address_i,
+	input logic [PROGRAM_PORT_COUNT*128-1:0] program_data_i,
+	input logic [PROGRAM_PORT_COUNT*4-1:0] program_strb_i,
+	input logic [PROGRAM_PORT_COUNT-1:0] program_last_i,
+	output logic [PROGRAM_PORT_COUNT-1:0] program_error_o,
 
 	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] external_issue_valid_i,
 	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] external_issue_ready_o,
@@ -55,13 +59,11 @@ module lpu_mem_subsystem #(
 	import lpu_program_load_pkg::*;
 	localparam integer QUEUE_COUNT = lpu_pkg::MEM_BANKS_PER_HEMISPHERE;
 
-	logic write_fire_w;
-	logic prime_fire_w;
-	logic destination_valid_w;
-	logic [2:0] program_target_kind_w;
-	logic [7:0] program_queue_id_w;
-	logic selected_load_ready_w;
-	logic selected_prime_ready_w;
+	logic [PROGRAM_PORT_COUNT-1:0] write_fire_w;
+	logic [PROGRAM_PORT_COUNT-1:0] prime_fire_w;
+	logic [PROGRAM_PORT_COUNT-1:0] destination_valid_w;
+	logic [PROGRAM_PORT_COUNT*PROGRAM_TARGET_KIND_WIDTH-1:0] program_target_kind_w;
+	logic [PROGRAM_PORT_COUNT*PROGRAM_TARGET_INDEX_WIDTH-1:0] program_queue_id_w;
 	logic [QUEUE_COUNT-1:0] load_ready;
 	logic [QUEUE_COUNT-1:0] prime_ready;
 	logic [QUEUE_COUNT-1:0] frontend_ready;
@@ -79,19 +81,16 @@ module lpu_mem_subsystem #(
 	logic [QUEUE_COUNT*lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] execution_issue_instruction;
 	logic frontend_rst_ni;
 
-	assign program_target_kind_w = program_destination_i[
-		PROGRAM_DESTINATION_KIND_MSB:PROGRAM_DESTINATION_KIND_LSB];
-	assign program_queue_id_w = program_destination_i[
-		PROGRAM_DESTINATION_INDEX_MSB:PROGRAM_DESTINATION_INDEX_LSB];
-	assign destination_valid_w =
-		(program_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] == HEMISPHERE_INDEX) &&
-		(program_target_kind_w == PROGRAM_TARGET_MEM) && (program_queue_id_w < QUEUE_COUNT);
-	assign write_fire_w = program_valid_i && program_ready_o &&
-		(program_control_i == PROGRAM_LOAD_WRITE) && destination_valid_w &&
-		(program_strb_i == 4'b0111) &&
-		(program_address_i < IMEM_DEPTH);
-	assign prime_fire_w = program_valid_i && program_ready_o &&
-		(program_control_i == PROGRAM_LOAD_PRIME) && destination_valid_w;
+	initial begin
+		if(PROGRAM_PORT_COUNT < 1 || PROGRAM_BANKS_PER_PORT < 1)begin
+			$error("MEM Program port organization must be positive");
+		end
+		if((PROGRAM_PORT_COUNT * PROGRAM_BANKS_PER_PORT) < QUEUE_COUNT ||
+			((PROGRAM_PORT_COUNT - 1) * PROGRAM_BANKS_PER_PORT) >= QUEUE_COUNT)begin
+			$error("MEM Program ports must cover every Bank exactly once");
+		end
+	end
+
 	assign frontend_rst_ni = rst_ni && !program_reset_i;
 	assign frontends_ready_o = &frontend_ready;
 	assign frontends_idle_o = (&frontend_idle) && (&timed_queue_idle);
@@ -103,32 +102,70 @@ module lpu_mem_subsystem #(
 		local_issue_instruction_o : external_issue_instruction_i;
 	assign external_issue_ready_o = local_frontend_enable_i ? '0 : execution_issue_ready;
 
-	// The 12-bit Destination stays intact at the FU boundary; MEM decodes its local Bank here.
-	always_comb begin
-		selected_load_ready_w = 1'b0;
-		selected_prime_ready_w = 1'b0;
-		if(destination_valid_w)begin
-			selected_load_ready_w = load_ready[program_queue_id_w];
-			selected_prime_ready_w = prime_ready[program_queue_id_w];
+	// Every Program port is owned by one Relay and can address only that Relay's
+	// disjoint Bank range. Invalid destinations are consumed with an error.
+	generate
+		for(genvar program_port_gen = 0; program_port_gen < PROGRAM_PORT_COUNT;
+			program_port_gen = program_port_gen + 1)begin : gen_program_port
+			localparam integer LOCAL_BANK_BASE = program_port_gen * PROGRAM_BANKS_PER_PORT;
+			localparam integer LOCAL_BANK_COUNT =
+				((QUEUE_COUNT - LOCAL_BANK_BASE) > PROGRAM_BANKS_PER_PORT) ?
+				PROGRAM_BANKS_PER_PORT : (QUEUE_COUNT - LOCAL_BANK_BASE);
+			logic selected_load_ready;
+			logic selected_prime_ready;
+
+			assign program_target_kind_w[program_port_gen*PROGRAM_TARGET_KIND_WIDTH+:
+				PROGRAM_TARGET_KIND_WIDTH] = program_destination_i[
+				program_port_gen*PROGRAM_DESTINATION_WIDTH+PROGRAM_DESTINATION_KIND_LSB+:
+				PROGRAM_TARGET_KIND_WIDTH];
+			assign program_queue_id_w[program_port_gen*PROGRAM_TARGET_INDEX_WIDTH+:
+				PROGRAM_TARGET_INDEX_WIDTH] = program_destination_i[
+				program_port_gen*PROGRAM_DESTINATION_WIDTH+PROGRAM_DESTINATION_INDEX_LSB+:
+				PROGRAM_TARGET_INDEX_WIDTH];
+			assign destination_valid_w[program_port_gen] =
+				(program_destination_i[program_port_gen*PROGRAM_DESTINATION_WIDTH+
+				 PROGRAM_DESTINATION_HEMISPHERE_BIT] == HEMISPHERE_INDEX) &&
+				(program_target_kind_w[program_port_gen*PROGRAM_TARGET_KIND_WIDTH+:
+				 PROGRAM_TARGET_KIND_WIDTH] == PROGRAM_TARGET_MEM) &&
+				(program_queue_id_w[program_port_gen*PROGRAM_TARGET_INDEX_WIDTH+:
+				 PROGRAM_TARGET_INDEX_WIDTH] >= LOCAL_BANK_BASE) &&
+				(program_queue_id_w[program_port_gen*PROGRAM_TARGET_INDEX_WIDTH+:
+				 PROGRAM_TARGET_INDEX_WIDTH] < LOCAL_BANK_BASE + LOCAL_BANK_COUNT);
+			assign selected_load_ready = destination_valid_w[program_port_gen] ?
+				load_ready[program_queue_id_w[program_port_gen*PROGRAM_TARGET_INDEX_WIDTH+:
+				 PROGRAM_TARGET_INDEX_WIDTH]] : 1'b1;
+			assign selected_prime_ready = destination_valid_w[program_port_gen] ?
+				prime_ready[program_queue_id_w[program_port_gen*PROGRAM_TARGET_INDEX_WIDTH+:
+				 PROGRAM_TARGET_INDEX_WIDTH]] : 1'b1;
+			assign program_ready_o[program_port_gen] =
+				(program_control_i[program_port_gen*PROGRAM_LOAD_CONTROL_WIDTH+:
+				 PROGRAM_LOAD_CONTROL_WIDTH] == PROGRAM_LOAD_WRITE) ?
+				selected_load_ready : selected_prime_ready;
+			assign program_error_o[program_port_gen] = program_valid_i[program_port_gen] &&
+				program_ready_o[program_port_gen] &&
+				(!destination_valid_w[program_port_gen] ||
+				 ((program_control_i[program_port_gen*PROGRAM_LOAD_CONTROL_WIDTH+:
+				   PROGRAM_LOAD_CONTROL_WIDTH] == PROGRAM_LOAD_WRITE) &&
+				  ((program_strb_i[program_port_gen*4+:4] != 4'b0111) ||
+				   (program_address_i[program_port_gen*17+:17] >= IMEM_DEPTH))));
+			assign write_fire_w[program_port_gen] = program_valid_i[program_port_gen] &&
+				program_ready_o[program_port_gen] &&
+				(program_control_i[program_port_gen*PROGRAM_LOAD_CONTROL_WIDTH+:
+				 PROGRAM_LOAD_CONTROL_WIDTH] == PROGRAM_LOAD_WRITE) &&
+				destination_valid_w[program_port_gen] &&
+				(program_strb_i[program_port_gen*4+:4] == 4'b0111) &&
+				(program_address_i[program_port_gen*17+:17] < IMEM_DEPTH);
+			assign prime_fire_w[program_port_gen] = program_valid_i[program_port_gen] &&
+				program_ready_o[program_port_gen] &&
+				(program_control_i[program_port_gen*PROGRAM_LOAD_CONTROL_WIDTH+:
+				 PROGRAM_LOAD_CONTROL_WIDTH] == PROGRAM_LOAD_PRIME) &&
+				destination_valid_w[program_port_gen];
 		end
-		else begin
-			// Invalid destinations are consumed and reported instead of holding
-			// Program Load in permanent backpressure.
-			selected_load_ready_w = 1'b1;
-			selected_prime_ready_w = 1'b1;
-		end
-		case(program_control_i)
-			PROGRAM_LOAD_WRITE: program_ready_o = selected_load_ready_w;
-			PROGRAM_LOAD_PRIME: program_ready_o = selected_prime_ready_w;
-		endcase
-		program_error_o = program_valid_i && program_ready_o &&
-			(!destination_valid_w ||
-			 ((program_control_i == PROGRAM_LOAD_WRITE) &&
-			  ((program_strb_i != 4'b0111) || (program_address_i >= IMEM_DEPTH))));
-	end
+	endgenerate
 
 	generate
 		for(genvar queue_gen = 0; queue_gen < QUEUE_COUNT; queue_gen++)begin : gen_bank_frontend
+			localparam integer PROGRAM_PORT_INDEX = queue_gen / PROGRAM_BANKS_PER_PORT;
 			logic [$clog2(FU_QUEUE_DEPTH+1)-1:0] timed_queue_level;
 			logic frontend_run;
 			logic [31:0] frontend_schedule_cycle;
@@ -145,11 +182,17 @@ module lpu_mem_subsystem #(
 				.ACTIVE_CONTEXTS(ACTIVE_CONTEXTS)
 			) u_frontend (
 				.clk_i, .rst_ni, .program_reset_i, .clear_i(1'b0),
-				.load_valid_i(write_fire_w && (program_queue_id_w == queue_gen)),
-				.load_ready_o(load_ready[queue_gen]), .load_address_i(program_address_i),
-				.load_data_i(program_data_i), .load_strb_i(program_strb_i),
-				.load_last_i(program_last_i),
-				.prime_valid_i(prime_fire_w && (program_queue_id_w == queue_gen)),
+				.load_valid_i(write_fire_w[PROGRAM_PORT_INDEX] &&
+					(program_queue_id_w[PROGRAM_PORT_INDEX*PROGRAM_TARGET_INDEX_WIDTH+:
+					 PROGRAM_TARGET_INDEX_WIDTH] == queue_gen)),
+				.load_ready_o(load_ready[queue_gen]),
+				.load_address_i(program_address_i[PROGRAM_PORT_INDEX*17+:17]),
+				.load_data_i(program_data_i[PROGRAM_PORT_INDEX*128+:128]),
+				.load_strb_i(program_strb_i[PROGRAM_PORT_INDEX*4+:4]),
+				.load_last_i(program_last_i[PROGRAM_PORT_INDEX]),
+				.prime_valid_i(prime_fire_w[PROGRAM_PORT_INDEX] &&
+					(program_queue_id_w[PROGRAM_PORT_INDEX*PROGRAM_TARGET_INDEX_WIDTH+:
+					 PROGRAM_TARGET_INDEX_WIDTH] == queue_gen)),
 				.prime_ready_o(prime_ready[queue_gen]), .run_i(frontend_run),
 				.schedule_cycle_i(frontend_schedule_cycle),
 				.issue_valid_o(frontend_issue_valid[queue_gen]),
