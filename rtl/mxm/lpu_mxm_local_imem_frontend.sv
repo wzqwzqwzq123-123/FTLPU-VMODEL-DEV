@@ -173,6 +173,8 @@ module lpu_mxm_local_imem_frontend #(
 		.fault_code_o(fetch_fault_code)
 	);
 
+	// Select the Load, Dequant, or Compute Macro Frontend at elaboration time
+	// and normalize its native issue width onto the shared local interface.
 	generate
 		if(TARGET_KIND == 1)begin : gen_load_frontend
 			lpu_mxm_load_macro_frontend #(
@@ -237,6 +239,8 @@ module lpu_mxm_local_imem_frontend #(
 		end
 	endgenerate
 
+	// Track the loaded image extent and start Fetch only after a valid PRIME.
+	// Fetch completion remains sticky until the Queue-local reset is asserted.
 	always_ff @(posedge clk_i or negedge queue_rst_ni) begin
 		if(!queue_rst_ni)begin
 			configured_q <= 1'b0;

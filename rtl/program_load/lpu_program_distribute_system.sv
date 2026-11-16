@@ -223,6 +223,8 @@ module lpu_program_distribute_system (
 		.fault_o(distributor_fault),
 		.fault_code_o(distributor_fault_code)
 	);
+
+//decide waht the destination is and the kind of the FU
 	generate
 		for(genvar destination_gen = 0; destination_gen < 2; destination_gen = destination_gen + 1)begin : gen_destination_fields
 			assign destination_hemisphere_match_w[destination_gen] =

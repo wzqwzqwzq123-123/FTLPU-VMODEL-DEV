@@ -163,6 +163,8 @@ module lpu_mem_subsystem #(
 		end
 	endgenerate
 
+	// Instantiate one independent iMEM Frontend and Timed Queue per MEM Bank.
+	// Each Bank selects the Program port that owns its fixed Bank range.
 	generate
 		for(genvar queue_gen = 0; queue_gen < QUEUE_COUNT; queue_gen++)begin : gen_bank_frontend
 			localparam integer PROGRAM_PORT_INDEX = queue_gen / PROGRAM_BANKS_PER_PORT;
@@ -228,6 +230,8 @@ module lpu_mem_subsystem #(
 		end
 	endgenerate
 
+	// Select the native MEM command path or the legacy Slice-compatible path
+	// while preserving the same Bank-local issue ownership at this boundary.
 	generate
 		if(USE_NATIVE_MEM)begin : gen_native_execution
 			logic [QUEUE_COUNT-1:0] native_issue_valid;

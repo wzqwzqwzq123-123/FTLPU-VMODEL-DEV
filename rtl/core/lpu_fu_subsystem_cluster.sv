@@ -340,6 +340,8 @@ module lpu_fu_subsystem_cluster #(
 		end
 	end
 
+	// Instantiate the per-Hemisphere MEM, SXM, and two MXM subsystems and join
+	// their directional Stream boundaries without changing local ownership.
 	generate
 		for(genvar hemisphere_gen = 0; hemisphere_gen < 2; hemisphere_gen = hemisphere_gen + 1)begin : gen_hemisphere
 			localparam integer HEMISPHERE_INDEX = hemisphere_gen;

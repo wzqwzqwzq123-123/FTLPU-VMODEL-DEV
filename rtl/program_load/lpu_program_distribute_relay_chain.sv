@@ -114,6 +114,8 @@ module lpu_program_distribute_relay_chain #(
 	assign relay_input_imem_address[0+:17] = distributor_record_imem_address_i;
 	assign relay_input_last[0] = distributor_record_last_i;
 
+	// Build the ordered Relay chain and connect each stage to its disjoint
+	// local MEM Bank range while forwarding non-local Records downstream.
 	generate
 		for(genvar relay_gen = 0; relay_gen < RELAY_COUNT; relay_gen = relay_gen + 1)begin : gen_relay
 			localparam integer LOCAL_GROUP_COUNT =

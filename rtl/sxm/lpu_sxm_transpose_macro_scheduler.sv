@@ -143,6 +143,8 @@ module lpu_sxm_transpose_macro_scheduler #(
 	assign timebase_invalid_w = run_i && run_seen_q &&
 		((previous_cycle_q == 32'hffff_ffff) || (schedule_cycle_i != previous_cycle_q + 1'b1));
 
+	// Select the highest-priority timing, queue, or Context validation fault
+	// before any Transpose Context can be admitted or advanced.
 	always_comb begin
 		dynamic_fault_w = 1'b0;
 		dynamic_fault_code_w = FAULT_NONE;

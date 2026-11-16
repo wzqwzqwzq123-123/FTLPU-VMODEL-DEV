@@ -271,6 +271,8 @@ module lpu_top #(
 		end
 	end
 
+	// Enable the distributed Program Load controller or tie off its external
+	// protocol without changing the always-present FU execution hierarchy.
 	generate
 		if(ENABLE_DISTRIBUTED_PROGRAM_FRONTEND)begin : gen_program_control
 			lpu_program_load_system #(

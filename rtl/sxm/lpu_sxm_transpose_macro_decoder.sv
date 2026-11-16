@@ -172,6 +172,8 @@ module lpu_sxm_transpose_macro_decoder (
 		end
 	end
 
+	// Latch the first packet-format fault, or mark completion only after the
+	// final decoded Transpose Context has been accepted downstream.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			done_q <= 1'b0;

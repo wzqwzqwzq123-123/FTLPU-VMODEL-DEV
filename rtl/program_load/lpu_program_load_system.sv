@@ -471,6 +471,8 @@ module lpu_program_load_system #(
 		end
 	end
 
+	// Reject duplicate or malformed Program descriptors and remember each
+	// accepted MEM or MXM target for the current load lifecycle.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			descriptor_fault_q <= 1'b0;

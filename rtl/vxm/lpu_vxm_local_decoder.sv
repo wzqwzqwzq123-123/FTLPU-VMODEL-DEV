@@ -20,18 +20,15 @@ module lpu_vxm_local_decoder #(
   logic       upper_bits_nonzero;
   logic       opcode_illegal;
   logic       source_illegal;
+  logic       chain_length_illegal;
+  logic       layout_illegal;
 
+  // Derive this physical Stage's head and tail roles from the resident chain
+  // configuration before interpreting any source fields.
   always_comb begin
-    opcode_o = {1'b0, instruction_i[2:0]};
-    lhs_code = 2'b00;
-    rhs_code = 2'b00;
-    upper_bits_nonzero = 1'b0;
-    opcode_illegal = 1'b0;
-    source_illegal = 1'b0;
-    lhs_source_o = VXM_SOURCE_INVALID;
-    rhs_source_o = VXM_SOURCE_INVALID;
     chain_head_o = 1'b0;
     chain_tail_o = 1'b0;
+    chain_length_illegal = 1'b0;
 
     case (chain_length_i)
       VXM_CHAIN_LENGTH_2: begin
@@ -49,9 +46,19 @@ module lpu_vxm_local_decoder #(
       default: begin
         chain_head_o = 1'b0;
         chain_tail_o = 1'b0;
-        source_illegal = 1'b1;
+        chain_length_illegal = 1'b1;
       end
     endcase
+  end
+
+  // Decode the queue-specific compact layout into a common Opcode and source
+  // code pair while checking reserved bits local to that layout.
+  always_comb begin
+    opcode_o = {1'b0, instruction_i[2:0]};
+    lhs_code = 2'b00;
+    rhs_code = 2'b00;
+    upper_bits_nonzero = 1'b0;
+    layout_illegal = 1'b0;
 
     // Compact instruction layouts:
     // Q0: op[2:0], lhs[4:3], rhs[5]
@@ -73,7 +80,7 @@ module lpu_vxm_local_decoder #(
         if (instruction_i[5]) begin
           opcode_o = VXM_LOCAL_LOG;
           if (instruction_i[5:0] != VXM_LOG_INSTRUCTION)
-            source_illegal = 1'b1;
+            layout_illegal = 1'b1;
         end
       end
       2, 4, 6: begin
@@ -82,9 +89,17 @@ module lpu_vxm_local_decoder #(
       end
       default: begin
         upper_bits_nonzero = 1'b1;
-        source_illegal = 1'b1;
+        layout_illegal = 1'b1;
       end
     endcase
+  end
+
+  // Resolve the decoded source codes according to whether this Stage starts a
+  // chain or consumes the previous Stage's result.
+  always_comb begin
+    lhs_source_o = VXM_SOURCE_INVALID;
+    rhs_source_o = VXM_SOURCE_INVALID;
+    source_illegal = 1'b0;
 
     if (chain_head_o) begin
       case (lhs_code)
@@ -125,15 +140,20 @@ module lpu_vxm_local_decoder #(
         end
       endcase
     end
+  end
 
+  // Apply Stage-specific Opcode restrictions after the compact layout has
+  // selected the effective Opcode.
+  always_comb begin
+    opcode_illegal = 1'b0;
     // C0/C2 positions are basic-only. C1 has Exp at opcode 6; C3 has
     // Reciprocal/Rsqrt at opcodes 6/7.
     if ((LOCAL_QUEUE % 2) == 0)
       opcode_illegal = (opcode_o > VXM_LOCAL_MAX);
     else if ((LOCAL_QUEUE == 1) || (LOCAL_QUEUE == 5))
       opcode_illegal = (opcode_o == VXM_LOCAL_SPECIAL1);
-
-    illegal_instruction_o = upper_bits_nonzero || opcode_illegal ||
-      source_illegal;
   end
+
+  assign illegal_instruction_o = upper_bits_nonzero || opcode_illegal ||
+    source_illegal || chain_length_illegal || layout_illegal;
 endmodule

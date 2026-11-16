@@ -84,6 +84,8 @@ module lpu_vxm_instruction_controller #(
     repeat_control_o[VXM_REPEAT_OUTPUT_ENABLE_BIT] = output_enable_q;
   end
 
+  // Run the resident-configuration lifecycle atomically: capture one command,
+  // load the configuration, emit spaced Execute tokens, and wait for tail Done.
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
       state_q <= STATE_IDLE;

@@ -158,6 +158,8 @@ module lpu_qctl_fabric #(
 		.fault_code_o(pool_fault_code)
 	);
 
+	// Instantiate one Queue-local QCTL Controller per FU Queue around the
+	// shared pool, preserving independent pause, event, and local-cycle state.
 	generate
 		for(genvar queue_index = 0; queue_index < QUEUE_COUNT; queue_index++)begin : gen_queue_controller
 			lpu_qctl_queue_controller #(
