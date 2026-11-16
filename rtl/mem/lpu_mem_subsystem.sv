@@ -70,12 +70,6 @@ module lpu_mem_subsystem #(
 	logic [QUEUE_COUNT-1:0] frontend_idle;
 	logic [QUEUE_COUNT-1:0] frontend_fault;
 	logic [QUEUE_COUNT*6-1:0] frontend_fault_code;
-	logic [QUEUE_COUNT-1:0] frontend_issue_valid;
-	logic [QUEUE_COUNT*lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] frontend_issue_instruction;
-	logic [QUEUE_COUNT*32-1:0] frontend_issue_cycle;
-	logic [QUEUE_COUNT-1:0] timed_queue_ready;
-	logic [QUEUE_COUNT-1:0] timed_queue_idle;
-	logic [QUEUE_COUNT-1:0] timed_queue_fault;
 	logic [QUEUE_COUNT-1:0] execution_issue_valid;
 	logic [QUEUE_COUNT-1:0] execution_issue_ready;
 	logic [QUEUE_COUNT*lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] execution_issue_instruction;
@@ -93,10 +87,10 @@ module lpu_mem_subsystem #(
 
 	assign frontend_rst_ni = rst_ni && !program_reset_i;
 	assign frontends_ready_o = &frontend_ready;
-	assign frontends_idle_o = (&frontend_idle) && (&timed_queue_idle);
-	assign frontend_fault_o = (|frontend_fault) || (|timed_queue_fault) || (|mem_fault_o);
+	assign frontends_idle_o = &frontend_idle;
+	assign frontend_fault_o = (|frontend_fault) || (|mem_fault_o);
 	assign frontend_fault_code_o = (|mem_fault_o) ? 6'd3 :
-		(((|frontend_fault) || (|timed_queue_fault)) ? 6'd2 : 6'd0);
+		((|frontend_fault) ? 6'd2 : 6'd0);
 	assign execution_issue_valid = local_frontend_enable_i ? local_issue_valid_o : external_issue_valid_i;
 	assign execution_issue_instruction = local_frontend_enable_i ?
 		local_issue_instruction_o : external_issue_instruction_i;
@@ -163,12 +157,11 @@ module lpu_mem_subsystem #(
 		end
 	endgenerate
 
-	// Instantiate one independent iMEM Frontend and Timed Queue per MEM Bank.
-	// Each Bank selects the Program port that owns its fixed Bank range.
+	// Instantiate one complete Instruction Frontend per MEM Bank. Each Frontend
+	// owns its Local iMEM, Macro pipeline, and final Instruction Queue.
 	generate
 		for(genvar queue_gen = 0; queue_gen < QUEUE_COUNT; queue_gen++)begin : gen_bank_frontend
 			localparam integer PROGRAM_PORT_INDEX = queue_gen / PROGRAM_BANKS_PER_PORT;
-			logic [$clog2(FU_QUEUE_DEPTH+1)-1:0] timed_queue_level;
 			logic frontend_run;
 			logic [31:0] frontend_schedule_cycle;
 
@@ -181,7 +174,8 @@ module lpu_mem_subsystem #(
 
 			lpu_mem_local_imem_frontend #(
 				.IMEM_DEPTH(IMEM_DEPTH),
-				.ACTIVE_CONTEXTS(ACTIVE_CONTEXTS)
+				.ACTIVE_CONTEXTS(ACTIVE_CONTEXTS),
+				.INSTRUCTION_QUEUE_DEPTH(FU_QUEUE_DEPTH)
 			) u_frontend (
 				.clk_i, .rst_ni, .program_reset_i, .clear_i(1'b0),
 				.load_valid_i(write_fire_w[PROGRAM_PORT_INDEX] &&
@@ -197,36 +191,16 @@ module lpu_mem_subsystem #(
 					 PROGRAM_TARGET_INDEX_WIDTH] == queue_gen)),
 				.prime_ready_o(prime_ready[queue_gen]), .run_i(frontend_run),
 				.schedule_cycle_i(frontend_schedule_cycle),
-				.issue_valid_o(frontend_issue_valid[queue_gen]),
-				.issue_ready_i(timed_queue_ready[queue_gen]),
-				.issue_instruction_o(frontend_issue_instruction[
-					queue_gen*lpu_pkg::MEM_INSTRUCTION_WIDTH+:lpu_pkg::MEM_INSTRUCTION_WIDTH]),
-				.issue_cycle_o(frontend_issue_cycle[queue_gen*32+:32]),
-				.configured_o(), .frontend_ready_o(frontend_ready[queue_gen]),
-				.frontend_idle_o(frontend_idle[queue_gen]),
-				.fault_o(frontend_fault[queue_gen]),
-				.fault_code_o(frontend_fault_code[queue_gen*6+:6])
-			);
-
-			// Timed Queue is the sequential ownership boundary between Macro
-			// scheduling and the selected MEM implementation.
-			lpu_mem_bank_queue #(.DEPTH(FU_QUEUE_DEPTH)) u_timed_queue (
-				.clk_i, .rst_ni(frontend_rst_ni), .run_i(frontend_run),
-				.schedule_cycle_i(frontend_schedule_cycle),
-				.enqueue_valid_i(frontend_issue_valid[queue_gen]),
-				.enqueue_ready_o(timed_queue_ready[queue_gen]),
-				.enqueue_instruction_i(frontend_issue_instruction[
-					queue_gen*lpu_pkg::MEM_INSTRUCTION_WIDTH+:lpu_pkg::MEM_INSTRUCTION_WIDTH]),
-				.enqueue_cycle_i(frontend_issue_cycle[queue_gen*32+:32]),
 				.issue_valid_o(local_issue_valid_o[queue_gen]),
 				.issue_ready_i(execution_issue_ready[queue_gen]),
 				.issue_instruction_o(local_issue_instruction_o[
 					queue_gen*lpu_pkg::MEM_INSTRUCTION_WIDTH+:lpu_pkg::MEM_INSTRUCTION_WIDTH]),
 				.issue_cycle_o(local_issue_cycle_o[queue_gen*32+:32]),
-				.level_o(timed_queue_level), .fault_o(timed_queue_fault[queue_gen])
+				.configured_o(), .frontend_ready_o(frontend_ready[queue_gen]),
+				.frontend_idle_o(frontend_idle[queue_gen]),
+				.fault_o(frontend_fault[queue_gen]),
+				.fault_code_o(frontend_fault_code[queue_gen*6+:6])
 			);
-
-			assign timed_queue_idle[queue_gen] = timed_queue_level == '0;
 		end
 	endgenerate
 

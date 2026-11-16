@@ -142,7 +142,7 @@ module lpu_mem_macro_frontend #(
 		.level_o(context_fifo_level_o)
 	);
 
-	// The Scheduler computes future base instructions; its downstream Timed Queue owns storage.
+	// The Scheduler computes future base instructions; the downstream Instruction Queue owns storage.
 	lpu_mem_macro_scheduler #(
 		.ACTIVE_CONTEXTS(ACTIVE_CONTEXTS),
 		.ISSUE_FIFO_DEPTH(ISSUE_FIFO_DEPTH),

@@ -24,7 +24,7 @@ module lpu_mem_macro_scheduler #(
 	input  logic [1:0]  context_induction_target_i,
 	input  logic [12:0] context_address_i,
 
-	// Look-ahead output is accepted directly by the FU-local Timed Queue.
+	// Look-ahead output is accepted directly by the FU-local Instruction Queue.
 	output logic        issue_valid_o,
 	input  logic        issue_ready_i,
 	output logic [lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] issue_instruction_o,
@@ -136,8 +136,8 @@ module lpu_mem_macro_scheduler #(
 	logic missed_generation_w;
 	logic schedule_select_fire;
 
-	// Timed Queue handoff. Backpressure at the look-ahead cycle is terminal.
-	logic timed_queue_blocked_w;
+	// Instruction Queue handoff. Backpressure at the look-ahead cycle is terminal.
+	logic instruction_queue_blocked_w;
 	logic ingress_capacity_deadline_w;
 
 	// Fault arbitration is explicit so the first hardware contract violation is retained.
@@ -155,7 +155,7 @@ module lpu_mem_macro_scheduler #(
 			$error("ISSUE_FIFO_DEPTH must be at least one");
 		end
 		if(ISSUE_LOOKAHEAD < 2)begin
-			$error("ISSUE_LOOKAHEAD must cover Timed Queue write and deadline Issue stages");
+			$error("ISSUE_LOOKAHEAD must cover Instruction Queue write and deadline Issue stages");
 		end
 	end
 
@@ -312,13 +312,13 @@ module lpu_mem_macro_scheduler #(
 		end
 	end
 
-	// The Scheduler computes one future base instruction; the Timed Queue is the register boundary.
+	// The Scheduler computes one future base instruction; the Instruction Queue is the register boundary.
 	assign issue_valid_o = scheduler_active_w && selected_valid_w && (due_count_w == 1) &&
 		!missed_generation_w && !fault_q;
 	assign issue_instruction_o = selected_valid_w ?
 		context_to_mem_instruction(active_instruction_q[selected_index_w], active_address_q[selected_index_w]) : '0;
 	assign issue_cycle_o = selected_valid_w ? lookahead_cycle_w : '0;
-	assign timed_queue_blocked_w = issue_valid_o && !issue_ready_i;
+	assign instruction_queue_blocked_w = issue_valid_o && !issue_ready_i;
 	assign ingress_capacity_deadline_w = run_i && ingress_valid_q && !free_slot_valid_w &&
 		(ingress_min_start_cycle_w[32] || ({1'b0, ingress_start_cycle_q} < ingress_min_start_cycle_w));
 
@@ -337,7 +337,7 @@ module lpu_mem_macro_scheduler #(
 			dynamic_fault_w = 1'b1;
 			dynamic_fault_code_w = FAULT_LOOKAHEAD;
 		end
-		else if(timed_queue_blocked_w)begin
+		else if(instruction_queue_blocked_w)begin
 			dynamic_fault_w = 1'b1;
 			dynamic_fault_code_w = FAULT_TIMED_QUEUE_BACKPRESSURE;
 		end
@@ -406,7 +406,7 @@ module lpu_mem_macro_scheduler #(
 		end
 	end
 
-	// Context state advances only when the FU-local Timed Queue accepts the generated instruction.
+	// Context state advances only when the FU-local Instruction Queue accepts the generated instruction.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			for(integer slot = 0; slot < ACTIVE_CONTEXTS; slot = slot + 1)begin

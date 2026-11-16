@@ -1,4 +1,4 @@
-module lpu_mem_bank_queue #(
+module lpu_mem_instruction_queue #(
 	parameter integer DEPTH = 16
 ) (
 	input logic clk_i,
@@ -32,7 +32,7 @@ module lpu_mem_bank_queue #(
 	logic late_fault_w;
 	logic fault_q;
 
-	// The Timed Queue is the only sequential buffer between the Scheduler and MEM Bank.
+	// The Instruction Queue stores decoded base instructions and their absolute Issue Cycles.
 	// A newly enqueued instruction becomes visible after the write edge; no empty bypass exists.
 	assign head_instruction = fifo_dequeue_data[0+:lpu_pkg::MEM_INSTRUCTION_WIDTH];
 	assign head_cycle = fifo_dequeue_data[lpu_pkg::MEM_INSTRUCTION_WIDTH+:32];

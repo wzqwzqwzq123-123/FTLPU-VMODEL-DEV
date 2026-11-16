@@ -4,7 +4,8 @@ module lpu_mem_local_imem_frontend #(
 	parameter integer ACTIVE_CONTEXTS = 4,
 	parameter integer WORD_FIFO_DEPTH = 4,
 	parameter integer CONTEXT_FIFO_DEPTH = 4,
-	parameter integer ISSUE_FIFO_DEPTH = 4
+	parameter integer ISSUE_FIFO_DEPTH = 4,
+	parameter integer INSTRUCTION_QUEUE_DEPTH = 16
 ) (
 	input logic clk_i,
 	input logic rst_ni,
@@ -40,8 +41,10 @@ module lpu_mem_local_imem_frontend #(
 	localparam logic [5:0] FAULT_IMEM = 6'd3;
 	localparam logic [5:0] FAULT_FETCH = 6'd4;
 	localparam logic [5:0] FAULT_FRONTEND = 6'd5;
+	localparam logic [5:0] FAULT_INSTRUCTION_QUEUE = 6'd6;
 
-	logic queue_rst_ni;
+	logic frontend_rst_ni;
+	logic instruction_queue_rst_ni;
 	logic configured_q;
 	logic prime_started_q;
 	logic fetch_started_q;
@@ -80,9 +83,16 @@ module lpu_mem_local_imem_frontend #(
 
 	logic decoder_done;
 	logic scheduler_prime_ready;
-	logic frontend_fault;
-	logic [4:0] frontend_fault_code;
+	logic macro_frontend_fault;
+	logic [4:0] macro_frontend_fault_code;
 	logic macro_frontend_idle;
+	logic frontend_pipeline_fault;
+	logic scheduled_instruction_valid;
+	logic scheduled_instruction_ready;
+	logic [lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] scheduled_instruction;
+	logic [31:0] scheduled_instruction_cycle;
+	logic [$clog2(INSTRUCTION_QUEUE_DEPTH+1)-1:0] instruction_queue_level;
+	logic instruction_queue_fault;
 
 	initial begin
 		if(IMEM_DEPTH > 131072)begin
@@ -90,7 +100,8 @@ module lpu_mem_local_imem_frontend #(
 		end
 	end
 
-	assign queue_rst_ni = rst_ni && !program_reset_i && !clear_i;
+	assign frontend_rst_ni = rst_ni && !program_reset_i && !clear_i;
+	assign instruction_queue_rst_ni = rst_ni && !program_reset_i;
 	assign configured_o = configured_q;
 	assign load_ready_o = !prime_started_q && imem_load_ready && !fault_q;
 	assign load_fire = load_valid_i && load_ready_o;
@@ -102,15 +113,18 @@ module lpu_mem_local_imem_frontend #(
 	assign prime_fire = prime_valid_i && prime_ready_o;
 	assign prime_invalid_w = prime_fire && (!configured_q || !load_last_seen_q ||
 		(load_word_count_q == '0));
+	assign frontend_pipeline_fault = fault_q || imem_fault || fetch_fault || macro_frontend_fault;
 	assign frontend_ready_o = !configured_q || (prime_started_q && fetch_complete_q &&
-		decoder_done && scheduler_prime_ready && !fault_o);
-	assign frontend_idle_o = !configured_q || macro_frontend_idle;
+		decoder_done && scheduler_prime_ready && !frontend_pipeline_fault);
+	assign frontend_idle_o = !configured_q ||
+		(macro_frontend_idle && (instruction_queue_level == '0));
 
-	assign fault_o = fault_q || imem_fault || fetch_fault || frontend_fault;
+	assign fault_o = frontend_pipeline_fault || instruction_queue_fault;
 	assign fault_code_o = fault_q ? fault_code_q :
 		(imem_fault ? FAULT_IMEM :
 		(fetch_fault ? {4'd0, fetch_fault_code} + FAULT_FETCH :
-		(frontend_fault ? FAULT_FRONTEND : FAULT_NONE)));
+		(macro_frontend_fault ? FAULT_FRONTEND :
+		(instruction_queue_fault ? FAULT_INSTRUCTION_QUEUE : FAULT_NONE))));
 
 	lpu_mem_local_imem #(
 		.WORD_WIDTH(96),
@@ -118,7 +132,7 @@ module lpu_mem_local_imem_frontend #(
 		.ADDRESS_WIDTH(ADDRESS_WIDTH)
 	) u_imem (
 		.clk_i,
-		.rst_ni(queue_rst_ni),
+		.rst_ni(frontend_rst_ni),
 		.load_mode_i(!prime_started_q),
 		.load_valid_i(load_valid_i && load_ready_o && !load_invalid_w),
 		.load_ready_o(imem_load_ready),
@@ -143,7 +157,7 @@ module lpu_mem_local_imem_frontend #(
 		.WORD_WIDTH(96)
 	) u_fetch (
 		.clk_i,
-		.rst_ni(queue_rst_ni),
+		.rst_ni(frontend_rst_ni),
 		.start_valid_i(prime_started_q && !fetch_started_q),
 		.start_ready_o(fetch_start_ready),
 		.start_base_address_i(load_base_q),
@@ -171,9 +185,9 @@ module lpu_mem_local_imem_frontend #(
 		.WORD_FIFO_DEPTH(WORD_FIFO_DEPTH),
 		.CONTEXT_FIFO_DEPTH(CONTEXT_FIFO_DEPTH),
 		.ISSUE_FIFO_DEPTH(ISSUE_FIFO_DEPTH)
-	) u_frontend (
+	) u_macro_frontend (
 		.clk_i,
-		.rst_ni(queue_rst_ni),
+		.rst_ni(frontend_rst_ni),
 		.run_i,
 		.prime_i(prime_started_q && !run_i),
 		.schedule_cycle_i,
@@ -181,10 +195,10 @@ module lpu_mem_local_imem_frontend #(
 		.word_ready_o(fetch_word_ready),
 		.word_i(fetch_word),
 		.word_last_i(fetch_word_last),
-		.issue_valid_o,
-		.issue_ready_i,
-		.issue_instruction_o,
-		.issue_cycle_o,
+		.issue_valid_o(scheduled_instruction_valid),
+		.issue_ready_i(scheduled_instruction_ready),
+		.issue_instruction_o(scheduled_instruction),
+		.issue_cycle_o(scheduled_instruction_cycle),
 		.decoder_done_o(decoder_done),
 		.word_fifo_level_o(),
 		.context_fifo_level_o(),
@@ -192,13 +206,34 @@ module lpu_mem_local_imem_frontend #(
 		.active_count_o(),
 		.idle_o(macro_frontend_idle),
 		.prime_ready_o(scheduler_prime_ready),
-		.fault_o(frontend_fault),
-		.fault_code_o(frontend_fault_code)
+		.fault_o(macro_frontend_fault),
+		.fault_code_o(macro_frontend_fault_code)
+	);
+
+	// The Instruction Queue is the final Frontend stage. It stores decoded base
+	// instructions and releases them to the Datapath only at their absolute Issue Cycle.
+	lpu_mem_instruction_queue #(
+		.DEPTH(INSTRUCTION_QUEUE_DEPTH)
+	) u_instruction_queue (
+		.clk_i,
+		.rst_ni(instruction_queue_rst_ni),
+		.run_i,
+		.schedule_cycle_i,
+		.enqueue_valid_i(scheduled_instruction_valid),
+		.enqueue_ready_o(scheduled_instruction_ready),
+		.enqueue_instruction_i(scheduled_instruction),
+		.enqueue_cycle_i(scheduled_instruction_cycle),
+		.issue_valid_o,
+		.issue_ready_i,
+		.issue_instruction_o,
+		.issue_cycle_o,
+		.level_o(instruction_queue_level),
+		.fault_o(instruction_queue_fault)
 	);
 
 	// The descriptor is local to this Queue; only contiguous committed words are visible.
-	always_ff @(posedge clk_i or negedge queue_rst_ni) begin
-		if(!queue_rst_ni)begin
+	always_ff @(posedge clk_i or negedge frontend_rst_ni) begin
+		if(!frontend_rst_ni)begin
 			configured_q <= 1'b0;
 			load_last_seen_q <= 1'b0;
 			load_base_q <= '0;
@@ -232,8 +267,8 @@ module lpu_mem_local_imem_frontend #(
 		end
 	end
 
-	always_ff @(posedge clk_i or negedge queue_rst_ni) begin
-		if(!queue_rst_ni)begin
+	always_ff @(posedge clk_i or negedge frontend_rst_ni) begin
+		if(!frontend_rst_ni)begin
 			fault_q <= 1'b0;
 			fault_code_q <= FAULT_NONE;
 		end
