@@ -15,7 +15,7 @@ module lpu_qctl_shared_pool #(
 	input logic clear_i,
 	input logic load_mode_i,
 
-	// Program loading configures one non-overlapping partition per logical Queue.
+	// Configure a non-overlapping QCTL Pool region for each logical Queue.
 	input logic partition_valid_i,
 	output logic partition_ready_o,
 	input logic [QUEUE_ID_WIDTH-1:0] partition_queue_i,
@@ -23,7 +23,7 @@ module lpu_qctl_shared_pool #(
 	input logic [ENTRY_COUNT_WIDTH-1:0] partition_count_i,
 	input logic [GENERATION_WIDTH-1:0] partition_generation_i,
 
-	// QCTL records are physical 12-byte words: Cycle, 32-bit Opcode word and Operand.
+	// Write a 12-byte QCTL record to a physical address in the shared Pool.
 	input logic load_valid_i,
 	output logic load_ready_o,
 	input logic [POOL_ADDRESS_WIDTH-1:0] load_address_i,
@@ -59,6 +59,8 @@ module lpu_qctl_shared_pool #(
 	logic [GENERATION_WIDTH-1:0] partition_generation_q [0:QUEUE_COUNT-1];
 
 	logic [QUEUE_ID_WIDTH-1:0] round_robin_q;
+	logic selected_request_found_w;
+	logic [QUEUE_ID_WIDTH-1:0] selected_request_queue_w;
 	logic grant_valid_w;
 	logic [QUEUE_ID_WIDTH-1:0] grant_queue_w;
 	logic [ENTRY_INDEX_WIDTH-1:0] grant_index_w;
@@ -100,6 +102,7 @@ module lpu_qctl_shared_pool #(
 	assign partition_ready_o = load_mode_i && !fault_q;
 	assign partition_fire = partition_valid_i && partition_ready_o;
 	assign load_ready_o = load_mode_i && !fault_q;
+	assign partition_end_w = {1'b0, partition_base_i} + partition_count_i;
 	assign response_valid_o = response_pipe_valid_q[READ_LATENCY];
 	assign response_queue_o = response_pipe_queue_q[READ_LATENCY];
 	assign response_data_o = response_pipe_data_q[READ_LATENCY];
@@ -107,14 +110,17 @@ module lpu_qctl_shared_pool #(
 	assign fault_o = fault_q;
 	assign fault_code_o = fault_code_q;
 
-	// Partition validation is outside the runtime read path and may scan the small directory.
+	// Partition range validation rejects invalid Queue ownership, generation, size and Pool bounds.
 	always_comb begin
-		partition_end_w = {1'b0, partition_base_i} + partition_count_i;
 		partition_invalid_w = (partition_queue_i >= QUEUE_COUNT) || (partition_generation_i == 0) ||
 			(partition_count_i > QUEUE_ENTRY_LIMIT) || (partition_end_w > POOL_DEPTH);
 		if(partition_queue_i < QUEUE_COUNT)begin
 			partition_invalid_w = partition_invalid_w || partition_valid_q[partition_queue_i];
 		end
+	end
+
+	// Partition overlap detection scans the configured directory outside the runtime read path.
+	always_comb begin
 		partition_overlap_w = 1'b0;
 		if(partition_count_i != 0)begin
 			for(integer queue_index = 0; queue_index < QUEUE_COUNT; queue_index++)begin
@@ -127,13 +133,10 @@ module lpu_qctl_shared_pool #(
 		end
 	end
 
-	// Round-robin arbitration grants at most one local Controller in each physical cycle.
+	// Round-robin selection identifies at most one requesting local Controller in each physical cycle.
 	always_comb begin
-		request_ready_o = '0;
-		grant_valid_w = 1'b0;
-		grant_queue_w = '0;
-		grant_index_w = '0;
-		grant_generation_w = '0;
+		selected_request_found_w = 1'b0;
+		selected_request_queue_w = '0;
 		if(!load_mode_i && !fault_q)begin
 			for(integer request_offset = 0; request_offset < QUEUE_COUNT; request_offset++)begin
 				integer candidate_queue;
@@ -141,28 +144,49 @@ module lpu_qctl_shared_pool #(
 				if(candidate_queue >= QUEUE_COUNT)begin
 					candidate_queue = candidate_queue - QUEUE_COUNT;
 				end
-				if(!grant_valid_w && request_valid_i[candidate_queue])begin
-					grant_valid_w = 1'b1;
-					grant_queue_w = candidate_queue[QUEUE_ID_WIDTH-1:0];
-					grant_index_w = request_index_i[candidate_queue*ENTRY_INDEX_WIDTH+:ENTRY_INDEX_WIDTH];
-					grant_generation_w = request_generation_i[candidate_queue*GENERATION_WIDTH+:GENERATION_WIDTH];
-					request_ready_o[candidate_queue] = 1'b1;
+				if(!selected_request_found_w && request_valid_i[candidate_queue])begin
+					selected_request_found_w = 1'b1;
+					selected_request_queue_w = candidate_queue[QUEUE_ID_WIDTH-1:0];
 				end
 			end
 		end
 	end
 
-	// A stale generation or an index outside its Queue partition returns an explicit error response.
+	// Grant metadata is read only from the Queue selected by the round-robin arbiter.
 	always_comb begin
-		grant_address_w = '0;
+		grant_valid_w = selected_request_found_w;
+		grant_queue_w = selected_request_queue_w;
+		grant_index_w = '0;
+		grant_generation_w = '0;
+		if(selected_request_found_w)begin
+			grant_index_w = request_index_i[selected_request_queue_w*ENTRY_INDEX_WIDTH+:ENTRY_INDEX_WIDTH];
+			grant_generation_w = request_generation_i[selected_request_queue_w*GENERATION_WIDTH+:GENERATION_WIDTH];
+		end
+	end
+
+	// Ready is asserted only for the Queue whose request is granted in this cycle.
+	always_comb begin
+		request_ready_o = '0;
+		if(selected_request_found_w)begin
+			request_ready_o[selected_request_queue_w] = 1'b1;
+		end
+	end
+
+	// Grant validation rejects stale generations and indices outside the selected Queue partition.
+	always_comb begin
 		grant_error_w = 1'b0;
 		if(grant_valid_w)begin
 			grant_error_w = !partition_valid_q[grant_queue_w] ||
 				(grant_generation_w != partition_generation_q[grant_queue_w]) ||
 				(grant_index_w >= partition_count_q[grant_queue_w]);
-			if(!grant_error_w)begin
-				grant_address_w = {1'b0, partition_base_q[grant_queue_w]} + grant_index_w;
-			end
+		end
+	end
+
+	// Grant address generation converts a legal Queue-local index into a physical Pool address.
+	always_comb begin
+		grant_address_w = '0;
+		if(grant_valid_w && !grant_error_w)begin
+			grant_address_w = {1'b0, partition_base_q[grant_queue_w]} + grant_index_w;
 		end
 	end
 
@@ -221,10 +245,27 @@ module lpu_qctl_shared_pool #(
 		end
 	end
 
-	// The response pipeline preserves request order and the configured two-cycle default latency.
+	// Round-robin state advances after each granted request and wraps after the final Queue.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			round_robin_q <= '0;
+		end
+		else if(clear_i)begin
+			round_robin_q <= '0;
+		end
+		else if(grant_valid_w)begin
+			if(grant_queue_w == QUEUE_COUNT - 1)begin
+				round_robin_q <= '0;
+			end
+			else begin
+				round_robin_q <= grant_queue_w + 1'b1;
+			end
+		end
+	end
+
+	// The response pipeline preserves request order and the configured read latency.
+	always_ff @(posedge clk_i or negedge rst_ni) begin
+		if(!rst_ni)begin
 			for(integer stage = 0; stage <= READ_LATENCY; stage++)begin
 				response_pipe_valid_q[stage] <= 1'b0;
 				response_pipe_queue_q[stage] <= '0;
@@ -233,7 +274,6 @@ module lpu_qctl_shared_pool #(
 			end
 		end
 		else if(clear_i)begin
-			round_robin_q <= '0;
 			for(integer stage = 0; stage <= READ_LATENCY; stage++)begin
 				response_pipe_valid_q[stage] <= 1'b0;
 				response_pipe_queue_q[stage] <= '0;
@@ -252,14 +292,6 @@ module lpu_qctl_shared_pool #(
 			response_pipe_queue_q[0] <= grant_queue_w;
 			response_pipe_data_q[0] <= grant_error_w ? '0 : record_mem[grant_address_w[POOL_ADDRESS_WIDTH-1:0]];
 			response_pipe_error_q[0] <= grant_error_w;
-			if(grant_valid_w)begin
-				if(grant_queue_w == QUEUE_COUNT - 1)begin
-					round_robin_q <= '0;
-				end
-				else begin
-					round_robin_q <= grant_queue_w + 1'b1;
-				end
-			end
 		end
 	end
 

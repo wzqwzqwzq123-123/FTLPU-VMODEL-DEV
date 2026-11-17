@@ -73,7 +73,7 @@ module lpu_program_distribute_system (
 	logic [1:0] outer_write_error_w;
 	logic vxm_write_fire_w;
 	logic vxm_write_error_w;
-	logic [1:0] invalid_write_error_w;
+	logic [1:0] illegal_write_error_w;
 	logic [1:0] route_error_fire_w;
 	logic [PROGRAM_COMPLETION_SOURCE_COUNT-1:0] commit_valid_q;
 	logic distributor_idle;
@@ -143,7 +143,7 @@ module lpu_program_distribute_system (
 	logic [1:0] relay_chain_idle;
 	logic [1:0] relay_chain_fault;
 	logic [11:0] relay_chain_fault_code;
-	logic [1:0] endpoint_route_valid_w;
+	logic [1:0] endpoint_route_legal_w;
 	logic [1:0] endpoint_vxm_route_w;
 	logic [1:0] endpoint_chain_route_w;
 	logic [1:0] outer_endpoint_fire_w;
@@ -224,7 +224,7 @@ module lpu_program_distribute_system (
 		.fault_code_o(distributor_fault_code)
 	);
 
-//decide waht the destination is and the kind of the FU
+	// Decode the Hemisphere, FU class and local endpoint index carried by each Distributor branch.
 	generate
 		for(genvar destination_gen = 0; destination_gen < 2; destination_gen = destination_gen + 1)begin : gen_destination_fields
 			assign destination_hemisphere_match_w[destination_gen] =
@@ -309,31 +309,31 @@ module lpu_program_distribute_system (
 	// Decode the destination class once. Bank ownership is checked again at the
 	// Relay and MEM Subsystem boundaries.
 	always_comb begin
-		endpoint_route_valid_w = '0;
+		endpoint_route_legal_w = '0;
 		for(integer hemisphere = 0; hemisphere < 2; hemisphere = hemisphere + 1)begin
 			case(destination_target_kind_w[
 				hemisphere*PROGRAM_TARGET_KIND_WIDTH+:PROGRAM_TARGET_KIND_WIDTH])
-				PROGRAM_TARGET_MEM: endpoint_route_valid_w[hemisphere] =
+				PROGRAM_TARGET_MEM: endpoint_route_legal_w[hemisphere] =
 					destination_hemisphere_match_w[hemisphere] &&
 					(destination_target_index_w[
 					 hemisphere*PROGRAM_TARGET_INDEX_WIDTH+:PROGRAM_TARGET_INDEX_WIDTH] <
 					 lpu_pkg::MEM_BANKS_PER_HEMISPHERE);
 				PROGRAM_TARGET_MXM_LOAD,
 				PROGRAM_TARGET_MXM_DEQUANT,
-				PROGRAM_TARGET_MXM_COMPUTE: endpoint_route_valid_w[hemisphere] =
+				PROGRAM_TARGET_MXM_COMPUTE: endpoint_route_legal_w[hemisphere] =
 					destination_hemisphere_match_w[hemisphere] &&
 					(destination_target_index_w[
 					 hemisphere*PROGRAM_TARGET_INDEX_WIDTH+:PROGRAM_TARGET_INDEX_WIDTH] < 2);
 				PROGRAM_TARGET_SXM_TRANSPOSE,
-				PROGRAM_TARGET_SXM_PERMUTE: endpoint_route_valid_w[hemisphere] =
+				PROGRAM_TARGET_SXM_PERMUTE: endpoint_route_legal_w[hemisphere] =
 					destination_hemisphere_match_w[hemisphere] &&
 					(destination_target_index_w[
 					 hemisphere*PROGRAM_TARGET_INDEX_WIDTH+:PROGRAM_TARGET_INDEX_WIDTH] == 0);
-				PROGRAM_TARGET_VXM: endpoint_route_valid_w[hemisphere] =
+				PROGRAM_TARGET_VXM: endpoint_route_legal_w[hemisphere] =
 					(hemisphere == 0) && destination_hemisphere_match_w[hemisphere] &&
 					(destination_target_index_w[
 					 hemisphere*PROGRAM_TARGET_INDEX_WIDTH+:PROGRAM_TARGET_INDEX_WIDTH] <= 8);
-				default: endpoint_route_valid_w[hemisphere] = 1'b0;
+				default: endpoint_route_legal_w[hemisphere] = 1'b0;
 			endcase
 		end
 	end
@@ -342,23 +342,23 @@ module lpu_program_distribute_system (
 	// backpressure. Invalid destinations are consumed and converted into faults.
 	generate
 		for(genvar route_gen = 0; route_gen < 2; route_gen = route_gen + 1)begin : gen_endpoint_route
-			assign endpoint_vxm_route_w[route_gen] = endpoint_route_valid_w[route_gen] &&
+			assign endpoint_vxm_route_w[route_gen] = endpoint_route_legal_w[route_gen] &&
 				(destination_target_kind_w[route_gen*PROGRAM_TARGET_KIND_WIDTH+:
 				 PROGRAM_TARGET_KIND_WIDTH] == PROGRAM_TARGET_VXM);
-			assign endpoint_chain_route_w[route_gen] = endpoint_route_valid_w[route_gen] &&
+			assign endpoint_chain_route_w[route_gen] = endpoint_route_legal_w[route_gen] &&
 				!endpoint_vxm_route_w[route_gen];
 			assign relay_chain_input_valid[route_gen] =
 				endpoint_load_valid[route_gen] && endpoint_chain_route_w[route_gen];
-			assign endpoint_load_ready[route_gen] = !endpoint_route_valid_w[route_gen] ?
+			assign endpoint_load_ready[route_gen] = !endpoint_route_legal_w[route_gen] ?
 				1'b1 : (endpoint_vxm_route_w[route_gen] ?
 				vxm_program_ready : relay_chain_input_ready[route_gen]);
-			assign invalid_write_error_w[route_gen] = endpoint_load_valid[route_gen] &&
-				endpoint_load_ready[route_gen] && !endpoint_route_valid_w[route_gen] &&
+			assign illegal_write_error_w[route_gen] = endpoint_load_valid[route_gen] &&
+				endpoint_load_ready[route_gen] && !endpoint_route_legal_w[route_gen] &&
 				(endpoint_load_control[route_gen*PROGRAM_LOAD_CONTROL_WIDTH+:
 				 PROGRAM_LOAD_CONTROL_WIDTH] == PROGRAM_LOAD_WRITE);
 			assign route_error_fire_w[route_gen] = endpoint_load_valid[route_gen] &&
 				endpoint_load_ready[route_gen] &&
-				((!endpoint_route_valid_w[route_gen] &&
+				((!endpoint_route_legal_w[route_gen] &&
 				  (endpoint_load_control[route_gen*PROGRAM_LOAD_CONTROL_WIDTH+:
 				   PROGRAM_LOAD_CONTROL_WIDTH] != PROGRAM_LOAD_WRITE)) ||
 				 ((endpoint_load_control[route_gen*PROGRAM_LOAD_CONTROL_WIDTH+:
@@ -501,7 +501,7 @@ module lpu_program_distribute_system (
 		else if(program_reset_i)begin
 			route_fault_q <= 1'b0;
 		end
-		else if(!route_fault_q && ((|invalid_write_error_w) || (|route_error_fire_w) ||
+		else if(!route_fault_q && ((|illegal_write_error_w) || (|route_error_fire_w) ||
 			(|mem_write_error_w) || (|outer_write_error_w) || vxm_write_error_w ||
 			(|relay_chain_fault)))begin
 			route_fault_q <= 1'b1;

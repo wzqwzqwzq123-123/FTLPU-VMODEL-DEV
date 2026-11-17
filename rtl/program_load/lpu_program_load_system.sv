@@ -89,9 +89,9 @@ module lpu_program_load_system #(
 	logic [2:0] command_target_kind_w;
 	logic [7:0] command_target_index_w;
 	logic [7:0] command_global_target_w;
-	logic command_target_valid_w;
+	logic command_target_legal_w;
 	logic program_cmd_write_fire;
-	logic descriptor_invalid_w;
+	logic descriptor_illegal_w;
 	logic descriptor_duplicate_w;
 	logic descriptor_fault_q;
 
@@ -180,49 +180,55 @@ module lpu_program_load_system #(
 
 	assign internal_rst_ni = rst_ni && !program_reset_i;
 
-	// Destination already uses the physical endpoint namespace: 0 is East and 1 is West.
-	// The loader scope remains two bits only so the lower-level BOTH path can be preserved.
+	// Extract the physical endpoint namespace before validating and mapping the target.
+	assign command_scope_w = program_cmd_write_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] ?
+		PROGRAM_SCOPE_WEST : PROGRAM_SCOPE_EAST;
+	assign command_target_kind_w = program_cmd_write_destination_i[
+		PROGRAM_DESTINATION_KIND_MSB:PROGRAM_DESTINATION_KIND_LSB];
+	assign command_target_index_w = program_cmd_write_destination_i[
+		PROGRAM_DESTINATION_INDEX_MSB:PROGRAM_DESTINATION_INDEX_LSB];
+
+	// Target validation checks the Queue-local index against the selected FU class.
 	always_comb begin
-		command_scope_w = program_cmd_write_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] ?
-			PROGRAM_SCOPE_WEST : PROGRAM_SCOPE_EAST;
-		command_target_kind_w = program_cmd_write_destination_i[
-			PROGRAM_DESTINATION_KIND_MSB:PROGRAM_DESTINATION_KIND_LSB];
-		command_target_index_w = program_cmd_write_destination_i[
-			PROGRAM_DESTINATION_INDEX_MSB:PROGRAM_DESTINATION_INDEX_LSB];
+		command_target_legal_w = 1'b0;
+		case(command_target_kind_w)
+			PROGRAM_TARGET_MEM: command_target_legal_w =
+				command_target_index_w < lpu_pkg::MEM_BANKS_PER_HEMISPHERE;
+			PROGRAM_TARGET_MXM_LOAD,
+			PROGRAM_TARGET_MXM_DEQUANT,
+			PROGRAM_TARGET_MXM_COMPUTE: command_target_legal_w = command_target_index_w < 8'd2;
+			default: command_target_legal_w = 1'b0;
+		endcase
+	end
+
+	// Global target mapping adds the West offset only for a legal MEM or MXM endpoint.
+	always_comb begin
 		command_global_target_w = command_target_index_w;
-		command_target_valid_w = 1'b0;
 		case(command_target_kind_w)
 			PROGRAM_TARGET_MEM: begin
-				if(command_target_index_w < lpu_pkg::MEM_BANKS_PER_HEMISPHERE)begin
-					command_target_valid_w = 1'b1;
-					if(program_cmd_write_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] ==
-						PROGRAM_HEMISPHERE_WEST)begin
-						command_global_target_w = command_target_index_w +
-							lpu_pkg::MEM_BANKS_PER_HEMISPHERE;
-					end
+				if(command_target_legal_w &&
+					program_cmd_write_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] == PROGRAM_HEMISPHERE_WEST)begin
+					command_global_target_w = command_target_index_w + lpu_pkg::MEM_BANKS_PER_HEMISPHERE;
 				end
 			end
 			PROGRAM_TARGET_MXM_LOAD,
 			PROGRAM_TARGET_MXM_DEQUANT,
 			PROGRAM_TARGET_MXM_COMPUTE: begin
-				if(command_target_index_w < 8'd2)begin
-					command_target_valid_w = 1'b1;
-					if(program_cmd_write_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] ==
-						PROGRAM_HEMISPHERE_WEST)begin
-						command_global_target_w = command_target_index_w + 8'd2;
-					end
+				if(command_target_legal_w &&
+					program_cmd_write_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] == PROGRAM_HEMISPHERE_WEST)begin
+					command_global_target_w = command_target_index_w + 8'd2;
 				end
 			end
-			default: command_target_valid_w = 1'b0;
+			default: command_global_target_w = command_target_index_w;
 		endcase
 	end
 
 	assign program_cmd_write_ready_o = loader_program_cmd_write_ready && !load_request_active_q &&
 		!descriptor_fault_q;
 	assign program_cmd_write_fire = program_cmd_write_valid_i && program_cmd_write_ready_o;
-	assign descriptor_invalid_w = program_cmd_write_fire &&
+	assign descriptor_illegal_w = program_cmd_write_fire &&
 		(program_cmd_write_opcode_i == PROGRAM_LOADER_LOAD_IMEM) &&
-		(!command_target_valid_w || (program_cmd_write_encoding_mode_i != PROGRAM_ENCODING_MACRO) ||
+		(!command_target_legal_w || (program_cmd_write_encoding_mode_i != PROGRAM_ENCODING_MACRO) ||
 		 (program_cmd_write_byte_count_i == 0) ||
 		 ((command_target_kind_w == PROGRAM_TARGET_MEM) &&
 		  ((program_cmd_write_format_i != PROGRAM_FORMAT_96) ||
@@ -240,7 +246,7 @@ module lpu_program_load_system #(
 	// Detect a repeated Program descriptor for the selected MEM or MXM destination.
 	always_comb begin
 		descriptor_duplicate_w = 1'b0;
-		if(program_cmd_write_fire && (program_cmd_write_opcode_i == PROGRAM_LOADER_LOAD_IMEM) && command_target_valid_w)begin
+		if(program_cmd_write_fire && (program_cmd_write_opcode_i == PROGRAM_LOADER_LOAD_IMEM) && command_target_legal_w)begin
 			case(command_target_kind_w)
 				PROGRAM_TARGET_MEM: descriptor_duplicate_w = mem_target_seen_q[command_global_target_w];
 				PROGRAM_TARGET_MXM_LOAD: descriptor_duplicate_w = mxm_load_target_seen_q[command_global_target_w[1:0]];
@@ -490,11 +496,11 @@ module lpu_program_load_system #(
 			mxm_compute_target_seen_q <= '0;
 		end
 		else begin
-			if(descriptor_invalid_w || descriptor_duplicate_w)begin
+			if(descriptor_illegal_w || descriptor_duplicate_w)begin
 				descriptor_fault_q <= 1'b1;
 			end
 			if(program_cmd_write_fire && (program_cmd_write_opcode_i == PROGRAM_LOADER_LOAD_IMEM) &&
-				command_target_valid_w && !descriptor_invalid_w && !descriptor_duplicate_w)begin
+				command_target_legal_w && !descriptor_illegal_w && !descriptor_duplicate_w)begin
 				case(command_target_kind_w)
 					PROGRAM_TARGET_MEM: mem_target_seen_q[command_global_target_w] <= 1'b1;
 					PROGRAM_TARGET_MXM_LOAD: mxm_load_target_seen_q[command_global_target_w[1:0]] <= 1'b1;
