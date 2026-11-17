@@ -64,26 +64,28 @@ module lpu_mxm_dequant_macro_scheduler #(
 	logic [31:0] active_inner_remaining_q [0:ACTIVE_CONTEXTS-1];
 	logic [31:0] active_outer_remaining_q [0:ACTIVE_CONTEXTS-1];
 	logic [31:0] active_inner_interval_q [0:ACTIVE_CONTEXTS-1];
-	logic [31:0] active_outer_residual_q [0:ACTIVE_CONTEXTS-1];
+	logic [31:0] active_outer_cycle_transition_q [0:ACTIVE_CONTEXTS-1];
 	logic [31:0] active_next_cycle_q [0:ACTIVE_CONTEXTS-1];
 
-	logic context_fire;
-	logic ingress_admit_fire;
-	logic free_slot_valid_w;
+	// Capture the Context FIFO head into ingress on a completed input handshake.
+	logic context_capture_fire;
+	// Move a validated ingress Context into the first slot already free this cycle.
+	logic context_admit_fire;
+	logic free_slot_found_w;
 	integer free_slot_index_w;
 	logic [63:0] inner_steps_w;
 	logic [63:0] outer_steps_w;
 	logic [64:0] inner_cycle_span_w;
 	logic [64:0] final_cycle_w;
 	logic [31:0] effective_inner_interval_w;
-	logic [31:0] outer_residual_w;
-	logic context_invalid_w;
+	logic [31:0] outer_cycle_transition_w;
+	logic context_illegal_w;
 	logic ingress_late_w;
 	logic [32:0] ingress_min_start_w;
 
 	logic [32:0] lookahead_sum_w;
 	logic [31:0] lookahead_cycle_w;
-	logic selected_valid_w;
+	logic selected_context_found_w;
 	integer selected_index_w;
 	integer due_count_w;
 	logic missed_generation_w;
@@ -91,7 +93,7 @@ module lpu_mxm_dequant_macro_scheduler #(
 	logic [15:0] selected_instruction_w;
 
 	logic timed_queue_blocked_w;
-	logic timebase_invalid_w;
+	logic timebase_violation_w;
 	logic run_seen_q;
 	logic [31:0] previous_cycle_q;
 	logic dynamic_fault_w;
@@ -114,19 +116,19 @@ module lpu_mxm_dequant_macro_scheduler #(
 	end
 
 
-	assign context_fire = context_valid_i && context_ready_o;
+	assign context_capture_fire = context_valid_i && context_ready_o;
 	assign prime_mode_w = (prime_i === 1'b1) && !run_i;
 	assign scheduler_active_w = run_i || prime_mode_w;
-	assign issue_valid_o = scheduler_active_w && selected_valid_w && (due_count_w == 1) &&
+	assign issue_valid_o = scheduler_active_w && selected_context_found_w && (due_count_w == 1) &&
 		!missed_generation_w && !fault_q;
 	assign issue_instruction_o = selected_instruction_w;
-	assign issue_cycle_o = selected_valid_w ? lookahead_cycle_w : '0;
+	assign issue_cycle_o = selected_context_found_w ? lookahead_cycle_w : '0;
 	assign issue_fifo_level_o = '0;
 	assign timed_queue_blocked_w = issue_valid_o && !issue_ready_i;
 	assign idle_o = !ingress_valid_q && (active_count_o == '0);
 	assign conflict_o = fault_q ? (fault_code_q == FAULT_CONFLICT) : (scheduler_active_w && (due_count_w > 1));
 
-	// Count, interval and stride fields are converted once at admission.
+	// Count and interval fields are converted once at admission.
 	always_comb begin
 		inner_steps_w = ingress_inner_count_q == 0 ? 64'd0 : ({32'd0, ingress_inner_count_q} - 64'd1);
 		outer_steps_w = ingress_outer_count_q == 0 ? 64'd0 : ({32'd0, ingress_outer_count_q} - 64'd1);
@@ -134,16 +136,16 @@ module lpu_mxm_dequant_macro_scheduler #(
 		inner_cycle_span_w = {1'b0, inner_steps_w} * {33'd0, effective_inner_interval_w};
 		final_cycle_w = {33'd0, ingress_start_cycle_q} + inner_cycle_span_w +
 			({1'b0, outer_steps_w} * {33'd0, ingress_outer_interval_q});
-		outer_residual_w = ingress_outer_count_q == 1 ? 32'd1 :
+		outer_cycle_transition_w = ingress_outer_count_q == 1 ? 32'd1 :
 			ingress_outer_interval_q - inner_cycle_span_w[31:0];
 	end
 
-	// Runtime admission reserves enough lead for admission, Select and Issue FIFO visibility.
+	// Runtime admission reserves enough lead for selection and Timed Queue insertion.
 	always_comb begin
 		ingress_min_start_w = {1'b0, schedule_cycle_i} + ISSUE_LOOKAHEAD + 1;
 		ingress_late_w = run_i && (ingress_min_start_w[32] ||
 			({1'b0, ingress_start_cycle_q} < ingress_min_start_w));
-		context_invalid_w = (ingress_inner_count_q == 0) || (ingress_outer_count_q == 0) ||
+		context_illegal_w = (ingress_inner_count_q == 0) || (ingress_outer_count_q == 0) ||
 			(ingress_inner_interval_q == 0) || (ingress_outer_interval_q == 0) ||
 			((ingress_outer_count_q > 1) && ({33'd0, ingress_outer_interval_q} <= inner_cycle_span_w)) ||
 			(final_cycle_w[64:32] != 0) ||
@@ -151,13 +153,13 @@ module lpu_mxm_dequant_macro_scheduler #(
 			(ingress_inner_stride_q != 0) || (ingress_outer_stride_q != 0);
 	end
 
-	// The lowest invalid slot wins Context admission.
+	// The lowest free slot wins Context admission.
 	always_comb begin
-		free_slot_valid_w = 1'b0;
+		free_slot_found_w = 1'b0;
 		free_slot_index_w = 0;
 		for(integer slot = 0; slot < ACTIVE_CONTEXTS; slot = slot + 1)begin
-			if(!free_slot_valid_w && !active_valid_q[slot])begin
-				free_slot_valid_w = 1'b1;
+			if(!free_slot_found_w && !active_valid_q[slot])begin
+				free_slot_found_w = 1'b1;
 				free_slot_index_w = slot;
 			end
 		end
@@ -167,7 +169,7 @@ module lpu_mxm_dequant_macro_scheduler #(
 	always_comb begin
 		lookahead_sum_w = prime_mode_w ? 33'd0 : ({1'b0, schedule_cycle_i} + ISSUE_LOOKAHEAD);
 		lookahead_cycle_w = lookahead_sum_w[31:0];
-		selected_valid_w = 1'b0;
+		selected_context_found_w = 1'b0;
 		selected_index_w = 0;
 		due_count_w = 0;
 		missed_generation_w = 1'b0;
@@ -180,8 +182,8 @@ module lpu_mxm_dequant_macro_scheduler #(
 				end
 				else if(active_next_cycle_q[slot] == lookahead_cycle_w)begin
 					due_count_w = due_count_w + 1;
-					if(!selected_valid_w)begin
-						selected_valid_w = 1'b1;
+					if(!selected_context_found_w)begin
+						selected_context_found_w = 1'b1;
 						selected_index_w = slot;
 					end
 				end
@@ -189,18 +191,18 @@ module lpu_mxm_dequant_macro_scheduler #(
 		end
 	end
 
-	assign selected_instruction_w = selected_valid_w ? active_instruction_q[selected_index_w] : '0;
+	assign selected_instruction_w = selected_context_found_w ? active_instruction_q[selected_index_w] : '0;
 	assign schedule_select_fire = issue_valid_o && issue_ready_i && !dynamic_fault_w;
-	assign ingress_admit_fire = ingress_valid_q && free_slot_valid_w && !context_invalid_w &&
+	assign context_admit_fire = ingress_valid_q && free_slot_found_w && !context_illegal_w &&
 		!ingress_late_w && !fault_q && !dynamic_fault_w;
-	assign timebase_invalid_w = run_i && run_seen_q &&
+	assign timebase_violation_w = run_i && run_seen_q &&
 		((previous_cycle_q == 32'hffff_ffff) || (schedule_cycle_i != previous_cycle_q + 1'b1));
 
 	// Deadline violations are terminal; the Schedule clock never pauses for Issue backpressure.
 	always_comb begin
 		dynamic_fault_w = 1'b0;
 		dynamic_fault_code_w = FAULT_NONE;
-		if(timebase_invalid_w)begin
+		if(timebase_violation_w)begin
 			dynamic_fault_w = 1'b1;
 			dynamic_fault_code_w = FAULT_TIMEBASE;
 		end
@@ -220,11 +222,11 @@ module lpu_mxm_dequant_macro_scheduler #(
 			dynamic_fault_w = 1'b1;
 			dynamic_fault_code_w = FAULT_MISSED;
 		end
-		else if(ingress_valid_q && free_slot_valid_w && context_invalid_w)begin
+		else if(ingress_valid_q && free_slot_found_w && context_illegal_w)begin
 			dynamic_fault_w = 1'b1;
 			dynamic_fault_code_w = FAULT_CONTEXT;
 		end
-		else if(ingress_valid_q && free_slot_valid_w && ingress_late_w)begin
+		else if(ingress_valid_q && free_slot_found_w && ingress_late_w)begin
 			dynamic_fault_w = 1'b1;
 			dynamic_fault_code_w = FAULT_LATE;
 		end
@@ -242,10 +244,10 @@ module lpu_mxm_dequant_macro_scheduler #(
 			ingress_valid_q <= 1'b0;
 		end
 		else begin
-			if(ingress_admit_fire)begin
+			if(context_admit_fire)begin
 				ingress_valid_q <= 1'b0;
 			end
-			else if(context_fire)begin
+			else if(context_capture_fire)begin
 				ingress_valid_q <= 1'b1;
 				ingress_instruction_q <= context_instruction_i;
 				ingress_start_cycle_q <= context_start_cycle_i;
@@ -268,6 +270,7 @@ module lpu_mxm_dequant_macro_scheduler #(
 			end
 		end
 		else begin
+			// Existing Active Context advance / retirement
 			if(schedule_select_fire)begin
 				if(active_inner_remaining_q[selected_index_w] > 1)begin
 					active_inner_remaining_q[selected_index_w] <= active_inner_remaining_q[selected_index_w] - 1'b1;
@@ -278,20 +281,21 @@ module lpu_mxm_dequant_macro_scheduler #(
 					active_inner_remaining_q[selected_index_w] <= active_inner_count_q[selected_index_w];
 					active_outer_remaining_q[selected_index_w] <= active_outer_remaining_q[selected_index_w] - 1'b1;
 					active_next_cycle_q[selected_index_w] <= active_next_cycle_q[selected_index_w] +
-						active_outer_residual_q[selected_index_w];
+					active_outer_cycle_transition_q[selected_index_w];
 				end
 				else begin
 					active_valid_q[selected_index_w] <= 1'b0;
 				end
 			end
-			if(ingress_admit_fire)begin
+			// New Context admission uses a slot that was free before this edge.
+			if(context_admit_fire)begin
 				active_valid_q[free_slot_index_w] <= 1'b1;
 				active_instruction_q[free_slot_index_w] <= ingress_instruction_q;
 				active_inner_count_q[free_slot_index_w] <= ingress_inner_count_q;
 				active_inner_remaining_q[free_slot_index_w] <= ingress_inner_count_q;
 				active_outer_remaining_q[free_slot_index_w] <= ingress_outer_count_q;
 				active_inner_interval_q[free_slot_index_w] <= effective_inner_interval_w;
-				active_outer_residual_q[free_slot_index_w] <= outer_residual_w;
+				active_outer_cycle_transition_q[free_slot_index_w] <= outer_cycle_transition_w;
 				active_next_cycle_q[free_slot_index_w] <= ingress_start_cycle_q;
 			end
 		end

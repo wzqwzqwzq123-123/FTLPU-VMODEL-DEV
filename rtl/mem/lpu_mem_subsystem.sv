@@ -61,7 +61,7 @@ module lpu_mem_subsystem #(
 
 	logic [PROGRAM_PORT_COUNT-1:0] write_fire_w;
 	logic [PROGRAM_PORT_COUNT-1:0] prime_fire_w;
-	logic [PROGRAM_PORT_COUNT-1:0] destination_valid_w;
+	logic [PROGRAM_PORT_COUNT-1:0] destination_legal_w;
 	logic [PROGRAM_PORT_COUNT*PROGRAM_TARGET_KIND_WIDTH-1:0] program_target_kind_w;
 	logic [PROGRAM_PORT_COUNT*PROGRAM_TARGET_INDEX_WIDTH-1:0] program_queue_id_w;
 	logic [QUEUE_COUNT-1:0] load_ready;
@@ -116,7 +116,7 @@ module lpu_mem_subsystem #(
 				PROGRAM_TARGET_INDEX_WIDTH] = program_destination_i[
 				program_port_gen*PROGRAM_DESTINATION_WIDTH+PROGRAM_DESTINATION_INDEX_LSB+:
 				PROGRAM_TARGET_INDEX_WIDTH];
-			assign destination_valid_w[program_port_gen] =
+			assign destination_legal_w[program_port_gen] =
 				(program_destination_i[program_port_gen*PROGRAM_DESTINATION_WIDTH+
 				 PROGRAM_DESTINATION_HEMISPHERE_BIT] == HEMISPHERE_INDEX) &&
 				(program_target_kind_w[program_port_gen*PROGRAM_TARGET_KIND_WIDTH+:
@@ -125,10 +125,10 @@ module lpu_mem_subsystem #(
 				 PROGRAM_TARGET_INDEX_WIDTH] >= LOCAL_BANK_BASE) &&
 				(program_queue_id_w[program_port_gen*PROGRAM_TARGET_INDEX_WIDTH+:
 				 PROGRAM_TARGET_INDEX_WIDTH] < LOCAL_BANK_BASE + LOCAL_BANK_COUNT);
-			assign selected_load_ready = destination_valid_w[program_port_gen] ?
+			assign selected_load_ready = destination_legal_w[program_port_gen] ?
 				load_ready[program_queue_id_w[program_port_gen*PROGRAM_TARGET_INDEX_WIDTH+:
 				 PROGRAM_TARGET_INDEX_WIDTH]] : 1'b1;
-			assign selected_prime_ready = destination_valid_w[program_port_gen] ?
+			assign selected_prime_ready = destination_legal_w[program_port_gen] ?
 				prime_ready[program_queue_id_w[program_port_gen*PROGRAM_TARGET_INDEX_WIDTH+:
 				 PROGRAM_TARGET_INDEX_WIDTH]] : 1'b1;
 			assign program_ready_o[program_port_gen] =
@@ -137,7 +137,7 @@ module lpu_mem_subsystem #(
 				selected_load_ready : selected_prime_ready;
 			assign program_error_o[program_port_gen] = program_valid_i[program_port_gen] &&
 				program_ready_o[program_port_gen] &&
-				(!destination_valid_w[program_port_gen] ||
+				(!destination_legal_w[program_port_gen] ||
 				 ((program_control_i[program_port_gen*PROGRAM_LOAD_CONTROL_WIDTH+:
 				   PROGRAM_LOAD_CONTROL_WIDTH] == PROGRAM_LOAD_WRITE) &&
 				  ((program_strb_i[program_port_gen*4+:4] != 4'b0111) ||
@@ -146,14 +146,14 @@ module lpu_mem_subsystem #(
 				program_ready_o[program_port_gen] &&
 				(program_control_i[program_port_gen*PROGRAM_LOAD_CONTROL_WIDTH+:
 				 PROGRAM_LOAD_CONTROL_WIDTH] == PROGRAM_LOAD_WRITE) &&
-				destination_valid_w[program_port_gen] &&
+				destination_legal_w[program_port_gen] &&
 				(program_strb_i[program_port_gen*4+:4] == 4'b0111) &&
 				(program_address_i[program_port_gen*17+:17] < IMEM_DEPTH);
 			assign prime_fire_w[program_port_gen] = program_valid_i[program_port_gen] &&
 				program_ready_o[program_port_gen] &&
 				(program_control_i[program_port_gen*PROGRAM_LOAD_CONTROL_WIDTH+:
 				 PROGRAM_LOAD_CONTROL_WIDTH] == PROGRAM_LOAD_PRIME) &&
-				destination_valid_w[program_port_gen];
+				destination_legal_w[program_port_gen];
 		end
 	endgenerate
 
@@ -263,6 +263,7 @@ module lpu_mem_subsystem #(
 					(slice_gen*2)*lpu_pkg::MEM_INSTRUCTION_WIDTH+:lpu_pkg::MEM_INSTRUCTION_WIDTH];
 				assign mem_fault_o[slice_gen*2] = |legacy_tile_fault[slice_gen*4+:4];
 				assign mem_fault_o[slice_gen*2+1] = bank1_fault_q[slice_gen];
+				// Latch unsupported legacy Bank 1 traffic as a compatibility fault.
 				always_ff @(posedge clk_i or negedge frontend_rst_ni) begin
 					if(!frontend_rst_ni)begin
 						bank1_fault_q[slice_gen] <= 1'b0;
@@ -273,8 +274,7 @@ module lpu_mem_subsystem #(
 				end
 			end
 
-			// Legacy has one physical issue path per Slice. Bank 1 therefore
-			// produces an explicit compatibility fault instead of being aliased.
+			// Legacy has one issue path per Slice, so Bank 1 raises a compatibility fault.
 			lpu_mem_hemisphere #(
 				.DEPTH_ROWS(DEPTH_ROWS), .ACTIVE_COLUMNS(ACTIVE_COLUMNS),
 				.USE_SRAM_MACRO(USE_SRAM_MACRO)

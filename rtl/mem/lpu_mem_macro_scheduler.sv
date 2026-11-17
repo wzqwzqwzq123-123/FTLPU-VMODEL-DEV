@@ -69,9 +69,9 @@ module lpu_mem_macro_scheduler #(
 	logic [31:0] active_inner_remaining_q [0:ACTIVE_CONTEXTS-1];
 	logic [31:0] active_outer_remaining_q [0:ACTIVE_CONTEXTS-1];
 	logic [31:0] active_inner_interval_q [0:ACTIVE_CONTEXTS-1];
-	logic [31:0] active_outer_residual_q [0:ACTIVE_CONTEXTS-1];
+	logic [31:0] active_outer_cycle_transition_q [0:ACTIVE_CONTEXTS-1];
 	logic signed [13:0] active_inner_step_q [0:ACTIVE_CONTEXTS-1];
-	logic signed [13:0] active_row_transition_q [0:ACTIVE_CONTEXTS-1];
+	logic signed [13:0] active_outer_spatial_transition_q [0:ACTIVE_CONTEXTS-1];
 	logic [31:0] active_next_issue_cycle_q [0:ACTIVE_CONTEXTS-1];
 
 	// Shared Schedule time must advance by one on every consecutive run cycle.
@@ -87,7 +87,7 @@ module lpu_mem_macro_scheduler #(
 	logic free_slot_valid_w;
 	integer free_slot_index_w;
 
-	// Admission-time residual conversion and validation.
+	// Admission-time cycle and spatial transition conversion.
 	logic [63:0] schedule_inner_steps_w;
 	logic [63:0] schedule_outer_steps_w;
 	logic [64:0] schedule_inner_cycle_span_w;
@@ -96,8 +96,8 @@ module lpu_mem_macro_scheduler #(
 	logic [31:0] schedule_effective_inner_interval_w;
 	logic signed [64:0] schedule_effective_inner_step_w;
 	logic signed [64:0] schedule_inner_operand_span_w;
-	logic signed [64:0] schedule_row_transition_w;
-	logic [31:0] schedule_outer_residual_w;
+	logic signed [64:0] schedule_outer_spatial_transition_w;
+	logic [31:0] schedule_outer_cycle_transition_w;
 	logic signed [64:0] address_base_w;
 	logic signed [64:0] address_inner_corner_w;
 	logic signed [64:0] address_outer_corner_w;
@@ -199,18 +199,18 @@ module lpu_mem_macro_scheduler #(
 		schedule_effective_inner_step_w = (context_inner_count_i == 32'd1) ? 65'sd0 : $signed(context_inner_stride_i);
 	end
 
-	// Calculate the absolute cycle span, final deadline and outer-loop residual interval.
+	// Calculate the final deadline and cycle transition from one row end to the next row start.
 	always_comb begin
 		schedule_inner_cycle_span_w = {1'b0, schedule_inner_steps_w} * {33'd0, schedule_effective_inner_interval_w};
 		schedule_outer_cycle_span_w = {1'b0, schedule_outer_steps_w} * {33'd0, context_outer_interval_i};
 		schedule_final_cycle_w = {33'd0, context_start_cycle_i} + schedule_inner_cycle_span_w + schedule_outer_cycle_span_w;
-		schedule_outer_residual_w = (context_outer_count_i == 32'd1) ? 32'd1 : context_outer_interval_i - schedule_inner_cycle_span_w[31:0];
+		schedule_outer_cycle_transition_w = (context_outer_count_i == 32'd1) ? 32'd1 : context_outer_interval_i - schedule_inner_cycle_span_w[31:0];
 	end
 
 	// Convert the affine inner and outer strides into per-issue address update steps.
 	always_comb begin
 		schedule_inner_operand_span_w = $signed({1'b0, schedule_inner_steps_w}) * schedule_effective_inner_step_w;
-		schedule_row_transition_w = (context_outer_count_i == 32'd1) ? 65'sd0 : $signed(context_outer_stride_i) - schedule_inner_operand_span_w;
+		schedule_outer_spatial_transition_w = (context_outer_count_i == 32'd1) ? 65'sd0 : $signed(context_outer_stride_i) - schedule_inner_operand_span_w;
 	end
 
 	// Affine address extrema occur at the four two-dimensional loop corners.
@@ -246,7 +246,7 @@ module lpu_mem_macro_scheduler #(
 	// Validate the converted inner step and row transition against Active Context storage widths.
 	always_comb begin
 		step_parameters_illegal_w = (schedule_effective_inner_step_w < MIN_CONTEXT_STEP) || (schedule_effective_inner_step_w > MAX_CONTEXT_STEP) ||
-			(schedule_row_transition_w < MIN_CONTEXT_STEP) || (schedule_row_transition_w > MAX_CONTEXT_STEP);
+			(schedule_outer_spatial_transition_w < MIN_CONTEXT_STEP) || (schedule_outer_spatial_transition_w > MAX_CONTEXT_STEP);
 	end
 
 	// Check that a runtime Context arrives early enough for admission, selection and queue insertion.
@@ -417,8 +417,8 @@ module lpu_mem_macro_scheduler #(
 			else if(active_context_outer_advance_w)begin
 				active_outer_remaining_q[selected_index_w] <= active_outer_remaining_q[selected_index_w] - 1'b1;
 				active_inner_remaining_q[selected_index_w] <= active_inner_count_q[selected_index_w];
-				active_next_issue_cycle_q[selected_index_w] <= active_next_issue_cycle_q[selected_index_w] + active_outer_residual_q[selected_index_w];
-				active_address_q[selected_index_w] <= add_mem_address_step(active_address_q[selected_index_w], active_row_transition_q[selected_index_w]);
+				active_next_issue_cycle_q[selected_index_w] <= active_next_issue_cycle_q[selected_index_w] + active_outer_cycle_transition_q[selected_index_w];
+				active_address_q[selected_index_w] <= add_mem_address_step(active_address_q[selected_index_w], active_outer_spatial_transition_q[selected_index_w]);
 			end
 			else if(active_context_retire_w)begin
 				active_valid_q[selected_index_w] <= 1'b0;
@@ -433,9 +433,9 @@ module lpu_mem_macro_scheduler #(
 				active_inner_remaining_q[free_slot_index_w] <= context_inner_count_i;
 				active_outer_remaining_q[free_slot_index_w] <= context_outer_count_i;
 				active_inner_interval_q[free_slot_index_w] <= schedule_effective_inner_interval_w;
-				active_outer_residual_q[free_slot_index_w] <= schedule_outer_residual_w;
+				active_outer_cycle_transition_q[free_slot_index_w] <= schedule_outer_cycle_transition_w;
 				active_inner_step_q[free_slot_index_w] <= schedule_effective_inner_step_w[13:0];
-				active_row_transition_q[free_slot_index_w] <= schedule_row_transition_w[13:0];
+				active_outer_spatial_transition_q[free_slot_index_w] <= schedule_outer_spatial_transition_w[13:0];
 				active_next_issue_cycle_q[free_slot_index_w] <= context_start_cycle_i;
 			end
 		end

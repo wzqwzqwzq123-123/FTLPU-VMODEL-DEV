@@ -436,6 +436,7 @@ module lpu_fu_subsystem_cluster #(
 				);
 			end
 
+			// Merge both local MXM stream paths and flag overlapping westbound producers.
 			always_comb begin
 				mxm_east_valid = local_mxm_east_valid[0+:4*32] & local_mxm_east_valid[4*32+:4*32];
 				mxm_east_data = local_mxm_east_data[0+:4*32*64];

@@ -100,8 +100,7 @@ module lpu_qctl_fabric #(
 		end
 	end
 
-	// Return the first local fault code for compact top-level diagnosis. The
-	// per-Queue fault location remains visible in hierarchy and assertions.
+	// Return the first local fault code while per-Queue faults remain visible in hierarchy.
 	always_comb begin
 		controller_fault_found_w = 1'b0;
 		first_controller_fault_code_w = '0;
@@ -113,6 +112,7 @@ module lpu_qctl_fabric #(
 		end
 	end
 
+	// Remember every Queue configured for the current program until clear.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			queue_active_q <= '0;

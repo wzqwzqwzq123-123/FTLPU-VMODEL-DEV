@@ -41,6 +41,7 @@ module lpu_queue_fifo #(
 	assign enqueue_fire = enqueue_valid_i && enqueue_ready_o;
 	assign level_o = level_q;
 
+	// Write accepted entries without resetting the storage array.
 	always_ff @(posedge clk_i) begin
 		if(rst_ni)begin
 			if(enqueue_fire)begin
@@ -49,6 +50,7 @@ module lpu_queue_fifo #(
 		end
 	end
 
+	// Advance read and write pointers independently on completed transfers.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			write_ptr_q <= '0;
@@ -64,6 +66,7 @@ module lpu_queue_fifo #(
 		end
 	end
 
+	// Update occupancy once for each enqueue/dequeue combination.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			level_q <= '0;

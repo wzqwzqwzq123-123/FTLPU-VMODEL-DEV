@@ -188,6 +188,7 @@ module lpu_qctl_shared_pool #(
 		end
 	end
 
+	// Write accepted QCTL records into the shared pool without resetting SRAM contents.
 	always_ff @(posedge clk_i) begin
 		if(load_valid_i && load_ready_o && load_address_i < POOL_DEPTH)begin
 			record_mem[load_address_i] <= load_data_i;
@@ -262,6 +263,7 @@ module lpu_qctl_shared_pool #(
 		end
 	end
 
+	// Retain the first shared-pool load or request fault until clear.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			fault_q <= 1'b0;

@@ -123,8 +123,7 @@ module lpu_qctl_queue_controller #(
 	assign fault_o = fault_q;
 	assign fault_code_o = fault_code_q;
 
-	// Priming requires actual cache residency; once execution starts, runtime refill may
-	// legitimately leave fewer than CACHE_DEPTH entries resident without de-priming.
+	// Priming requires initial cache residency but remains sticky during runtime refill.
 	always_comb begin
 		if(control_count_q < CACHE_DEPTH)begin
 			primed_o = configured_q && (prime_complete_q ||
@@ -135,8 +134,7 @@ module lpu_qctl_queue_controller #(
 		end
 	end
 
-	// Consecutive ready WAIT_EVENT records may retire in one physical cycle.
-	// SYNC, NOTIFY and MEM_PACKET consume the boundary cycle and stop the scan.
+	// Scan in order; ready WAIT_EVENT records may co-retire before a boundary opcode stops the scan.
 	always_comb begin
 		retire_count_w = '0;
 		event_token_consume_w = '0;
@@ -413,6 +411,7 @@ module lpu_qctl_queue_controller #(
 		end
 	end
 
+	// Count available SYNC tokens, including simultaneous arrival and consumption.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			sync_token_count_q <= '0;
@@ -442,6 +441,7 @@ module lpu_qctl_queue_controller #(
 		end
 	end
 
+	// Retain the first Queue-local QCTL contract fault until reconfiguration or clear.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			fault_q <= 1'b0;
