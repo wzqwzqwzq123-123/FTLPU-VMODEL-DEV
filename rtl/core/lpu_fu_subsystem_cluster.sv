@@ -16,21 +16,42 @@ module lpu_fu_subsystem_cluster #(
 	input logic clk_i,
 	input logic rst_ni,
 	input logic program_reset_i,
-	input logic local_frontend_enable_i,
-	input logic external_run_i,
 
-	input logic load_distribute_valid_i,
-	output logic load_distribute_ready_o,
-	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] load_distribute_control_i,
-	input logic [127:0] load_distribute_data_i,
-	input logic [3:0] load_distribute_strb_i,
-	input logic [1:0] load_distribute_scope_i,
-	input logic [11:0] load_distribute_destination_i,
-	input logic [16:0] load_distribute_imem_address_i,
-	input logic load_distribute_last_i,
-	output logic load_distribute_idle_o,
-	output logic load_distribute_fault_o,
-	output logic [5:0] load_distribute_fault_code_o,
+	// Program Distribution terminates at these FU-local Program ports.
+	input logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_valid_i,
+	output logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_ready_o,
+	input logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*
+		lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] mem_program_control_i,
+	input logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*
+		lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0] mem_program_destination_i,
+	input logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*17-1:0] mem_program_address_i,
+	input logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*128-1:0] mem_program_data_i,
+	input logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*4-1:0] mem_program_strb_i,
+	input logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_last_i,
+	output logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_error_o,
+
+	input logic [3:0] mxm_program_valid_i,
+	output logic [3:0] mxm_program_ready_o,
+	output logic [3:0] mxm_program_error_o,
+	input logic [1:0] sxm_program_valid_i,
+	output logic [1:0] sxm_program_ready_o,
+	output logic [1:0] sxm_program_error_o,
+	input logic [2*lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] outer_program_control_i,
+	input logic [23:0] outer_program_destination_i,
+	input logic [33:0] outer_program_address_i,
+	input logic [255:0] outer_program_data_i,
+	input logic [7:0] outer_program_strb_i,
+	input logic [1:0] outer_program_last_i,
+
+	input logic vxm_program_valid_i,
+	output logic vxm_program_ready_o,
+	output logic vxm_program_error_o,
+	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] vxm_program_control_i,
+	input logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0] vxm_program_destination_i,
+	input logic [16:0] vxm_program_address_i,
+	input logic [127:0] vxm_program_data_i,
+	input logic [3:0] vxm_program_strb_i,
+	input logic vxm_program_last_i,
 
 	input logic program_start_i,
 	output logic program_start_ready_o,
@@ -72,24 +93,6 @@ module lpu_fu_subsystem_cluster #(
 	output logic qctl_fault_o,
 	output logic [7:0] qctl_fault_code_o,
 
-	input logic [lpu_pkg::MEM_BANK_COUNT-1:0] external_mem_issue_valid_i,
-	output logic [lpu_pkg::MEM_BANK_COUNT-1:0] external_mem_issue_ready_o,
-	input logic [lpu_pkg::MEM_BANK_COUNT*lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] external_mem_issue_instruction_i,
-	input logic [3:0] external_mxm_load_issue_valid_i,
-	input logic [4*48-1:0] external_mxm_load_issue_instruction_i,
-	input logic [3:0] external_mxm_dequant_issue_valid_i,
-	input logic [4*16-1:0] external_mxm_dequant_issue_instruction_i,
-	input logic [3:0] external_mxm_compute_issue_valid_i,
-	input logic [4*48-1:0] external_mxm_compute_issue_instruction_i,
-	input logic [1:0] external_sxm_transpose_issue_valid_i,
-	input logic [2*416-1:0] external_sxm_transpose_issue_instruction_i,
-	input logic [1:0] external_sxm_permute_issue_valid_i,
-	input logic [2*416-1:0] external_sxm_permute_issue_instruction_i,
-	input logic [7:0] external_vxm_local_issue_valid_i,
-	input logic [8*lpu_pkg::VXM_LOCAL_MAX_INSTRUCTION_WIDTH-1:0] external_vxm_local_issue_instruction_i,
-	input logic external_vxm_global_issue_valid_i,
-	input logic [lpu_pkg::VXM_GLOBAL_CONFIG_WIDTH-1:0] external_vxm_global_issue_instruction_i,
-
 	output logic [lpu_pkg::MEM_BANK_COUNT-1:0] local_mem_issue_valid_o,
 	output logic [lpu_pkg::MEM_BANK_COUNT*lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] local_mem_issue_instruction_o,
 	output logic [lpu_pkg::MEM_BANK_COUNT*32-1:0] local_mem_issue_cycle_o,
@@ -130,50 +133,15 @@ module lpu_fu_subsystem_cluster #(
 	logic started_q;
 	logic [31:0] schedule_cycle_q;
 	logic execution_run;
-	logic program_distribution_idle;
-	logic program_distribution_fault;
-	logic [5:0] program_distribution_fault_code;
-
-	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_valid;
-	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_ready;
-	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_error;
-	logic [PROGRAM_RELAY_PORT_COUNT*PROGRAM_LOAD_CONTROL_WIDTH-1:0] mem_program_control;
-	logic [PROGRAM_RELAY_PORT_COUNT*PROGRAM_DESTINATION_WIDTH-1:0] mem_program_destination;
-	logic [PROGRAM_RELAY_PORT_COUNT*17-1:0] mem_program_address;
-	logic [PROGRAM_RELAY_PORT_COUNT*128-1:0] mem_program_data;
-	logic [PROGRAM_RELAY_PORT_COUNT*4-1:0] mem_program_strb;
-	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_last;
 	logic [1:0] mem_frontends_ready;
 	logic [1:0] mem_frontends_idle;
 	logic [1:0] mem_frontend_fault;
 	logic [11:0] mem_frontend_fault_code;
 
-	logic [3:0] mxm_program_valid;
-	logic [3:0] mxm_program_ready;
-	logic [3:0] mxm_program_error;
-	logic [2*PROGRAM_LOAD_CONTROL_WIDTH-1:0] outer_program_control;
-	logic [23:0] outer_program_destination;
-	logic [33:0] outer_program_address;
-	logic [255:0] outer_program_data;
-	logic [7:0] outer_program_strb;
-	logic [1:0] outer_program_last;
 	logic [3:0] mxm_frontends_ready;
 	logic [3:0] mxm_frontends_idle;
 	logic [3:0] mxm_frontend_fault;
 	logic [23:0] mxm_frontend_fault_code;
-	logic [1:0] sxm_program_valid;
-	logic [1:0] sxm_program_ready;
-	logic [1:0] sxm_program_error;
-	logic vxm_program_valid;
-	logic vxm_program_ready;
-	logic vxm_program_error;
-	logic [PROGRAM_LOAD_CONTROL_WIDTH-1:0] vxm_program_control;
-	logic [PROGRAM_DESTINATION_WIDTH-1:0] vxm_program_destination;
-	logic [16:0] vxm_program_address;
-	logic [127:0] vxm_program_data;
-	logic [3:0] vxm_program_strb;
-	logic vxm_program_last;
-
 	logic [2*4*32-1:0] mem_to_vxm_west_valid;
 	logic [2*4*32*64-1:0] mem_to_vxm_west_data;
 	logic [2*4*32-1:0] vxm_to_mem_east_valid;
@@ -184,19 +152,17 @@ module lpu_fu_subsystem_cluster #(
 	logic qctl_all_primed;
 	logic qctl_all_done;
 
-	assign execution_run = local_frontend_enable_i ? started_q : external_run_i;
+	assign execution_run = started_q;
 	assign started_o = started_q;
 	assign schedule_cycle_o = schedule_cycle_q;
 	assign all_frontends_ready_o = (&mem_frontends_ready) && (&mxm_frontends_ready) &&
-		program_distribution_idle && (!ENABLE_QCTL || qctl_all_primed) && !frontend_fault_o;
-	assign all_frontends_idle_o = (&mem_frontends_idle) && (&mxm_frontends_idle) &&
-		program_distribution_idle;
-	assign program_start_ready_o = local_frontend_enable_i && all_frontends_ready_o && !started_q;
-	assign frontend_fault_o = program_distribution_fault || (|mem_frontend_fault) ||
-		(|mxm_frontend_fault) || (ENABLE_QCTL && qctl_fault_o);
-	assign frontend_fault_code_o = program_distribution_fault ? program_distribution_fault_code :
-		(((|mem_frontend_fault) || (|mxm_frontend_fault)) ? FAULT_FRONTEND :
-		((ENABLE_QCTL && qctl_fault_o) ? FAULT_QCTL : FAULT_NONE));
+		(!ENABLE_QCTL || qctl_all_primed) && !frontend_fault_o;
+	assign all_frontends_idle_o = (&mem_frontends_idle) && (&mxm_frontends_idle);
+	assign program_start_ready_o = all_frontends_ready_o && !started_q;
+	assign frontend_fault_o = (|mem_frontend_fault) || (|mxm_frontend_fault) ||
+		(ENABLE_QCTL && qctl_fault_o);
+	assign frontend_fault_code_o = ((|mem_frontend_fault) || (|mxm_frontend_fault)) ?
+		FAULT_FRONTEND : ((ENABLE_QCTL && qctl_fault_o) ? FAULT_QCTL : FAULT_NONE);
 
 	// Shared storage is global, while every generated Controller owns exactly one
 	// Queue-local Scheduler clock. Inactive lanes bypass QCTL in the FU subsystem.
@@ -268,58 +234,6 @@ module lpu_fu_subsystem_cluster #(
 		end
 	endgenerate
 
-	assign load_distribute_idle_o = program_distribution_idle;
-	assign load_distribute_fault_o = program_distribution_fault;
-	assign load_distribute_fault_code_o = program_distribution_fault_code;
-
-	lpu_program_distribute_system u_load_distribute_system (
-		.clk_i,
-		.rst_ni,
-		.program_reset_i,
-		.load_distribute_valid_i(load_distribute_valid_i),
-		.load_distribute_ready_o(load_distribute_ready_o),
-		.load_distribute_control_i(load_distribute_control_i),
-		.load_distribute_data_i(load_distribute_data_i),
-		.load_distribute_strb_i(load_distribute_strb_i),
-		.load_distribute_scope_i(load_distribute_scope_i),
-		.load_distribute_destination_i(load_distribute_destination_i),
-		.load_distribute_imem_address_i(load_distribute_imem_address_i),
-		.load_distribute_last_i(load_distribute_last_i),
-		.mem_program_valid_o(mem_program_valid),
-		.mem_program_ready_i(mem_program_ready),
-		.mem_program_control_o(mem_program_control),
-		.mem_program_destination_o(mem_program_destination),
-		.mem_program_address_o(mem_program_address),
-		.mem_program_data_o(mem_program_data),
-		.mem_program_strb_o(mem_program_strb),
-		.mem_program_last_o(mem_program_last),
-		.mem_program_error_i(mem_program_error),
-		.mxm_program_valid_o(mxm_program_valid),
-		.mxm_program_ready_i(mxm_program_ready),
-		.mxm_program_error_i(mxm_program_error),
-		.sxm_program_valid_o(sxm_program_valid),
-		.sxm_program_ready_i(sxm_program_ready),
-		.sxm_program_error_i(sxm_program_error),
-		.outer_program_control_o(outer_program_control),
-		.outer_program_destination_o(outer_program_destination),
-		.outer_program_address_o(outer_program_address),
-		.outer_program_data_o(outer_program_data),
-		.outer_program_strb_o(outer_program_strb),
-		.outer_program_last_o(outer_program_last),
-		.vxm_program_valid_o(vxm_program_valid),
-		.vxm_program_ready_i(vxm_program_ready),
-		.vxm_program_error_i(vxm_program_error),
-		.vxm_program_control_o(vxm_program_control),
-		.vxm_program_destination_o(vxm_program_destination),
-		.vxm_program_address_o(vxm_program_address),
-		.vxm_program_data_o(vxm_program_data),
-		.vxm_program_strb_o(vxm_program_strb),
-		.vxm_program_last_o(vxm_program_last),
-		.idle_o(program_distribution_idle),
-		.fault_o(program_distribution_fault),
-		.fault_code_o(program_distribution_fault_code)
-	);
-
 	// Schedule Cycle 0 becomes visible on the accepted START edge.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
@@ -378,7 +292,7 @@ module lpu_fu_subsystem_cluster #(
 				.USE_SRAM_MACRO(USE_SRAM_MACRO),
 				.USE_NATIVE_MEM(USE_NATIVE_MEM)
 			) u_mem_subsystem (
-				.clk_i, .rst_ni, .program_reset_i, .local_frontend_enable_i,
+				.clk_i, .rst_ni, .program_reset_i, .local_frontend_enable_i(1'b1),
 				.run_i(execution_run), .schedule_cycle_i(schedule_cycle_q),
 				.qctl_active_i(qctl_queue_active_o[
 					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
@@ -387,33 +301,29 @@ module lpu_fu_subsystem_cluster #(
 				.qctl_schedule_cycle_i(qctl_queue_cycle[
 					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE*32+:
 					lpu_pkg::MEM_BANKS_PER_HEMISPHERE*32]),
-				.program_valid_i(mem_program_valid[
+				.program_valid_i(mem_program_valid_i[
 					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT+:PROGRAM_RELAY_COUNT]),
-				.program_ready_o(mem_program_ready[
+				.program_ready_o(mem_program_ready_o[
 					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT+:PROGRAM_RELAY_COUNT]),
-				.program_control_i(mem_program_control[
+				.program_control_i(mem_program_control_i[
 					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT*PROGRAM_LOAD_CONTROL_WIDTH+:
 					PROGRAM_RELAY_COUNT*PROGRAM_LOAD_CONTROL_WIDTH]),
-				.program_destination_i(mem_program_destination[
+				.program_destination_i(mem_program_destination_i[
 					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT*PROGRAM_DESTINATION_WIDTH+:
 					PROGRAM_RELAY_COUNT*PROGRAM_DESTINATION_WIDTH]),
-				.program_address_i(mem_program_address[
+				.program_address_i(mem_program_address_i[
 					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT*17+:PROGRAM_RELAY_COUNT*17]),
-				.program_data_i(mem_program_data[
+				.program_data_i(mem_program_data_i[
 					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT*128+:PROGRAM_RELAY_COUNT*128]),
-				.program_strb_i(mem_program_strb[
+				.program_strb_i(mem_program_strb_i[
 					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT*4+:PROGRAM_RELAY_COUNT*4]),
-				.program_last_i(mem_program_last[
+				.program_last_i(mem_program_last_i[
 					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT+:PROGRAM_RELAY_COUNT]),
-				.program_error_o(mem_program_error[
+				.program_error_o(mem_program_error_o[
 					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT+:PROGRAM_RELAY_COUNT]),
-				.external_issue_valid_i(external_mem_issue_valid_i[
-					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
-				.external_issue_ready_o(external_mem_issue_ready_o[
-					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
-				.external_issue_instruction_i(external_mem_issue_instruction_i[
-					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE*lpu_pkg::MEM_INSTRUCTION_WIDTH+:
-					lpu_pkg::MEM_BANKS_PER_HEMISPHERE*lpu_pkg::MEM_INSTRUCTION_WIDTH]),
+				.external_issue_valid_i('0),
+				.external_issue_ready_o(),
+				.external_issue_instruction_i('0),
 				.local_issue_valid_o(local_mem_issue_valid_o[
 					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
 				.local_issue_instruction_o(local_mem_issue_instruction_o[
@@ -439,21 +349,21 @@ module lpu_fu_subsystem_cluster #(
 
 			lpu_sxm_subsystem u_sxm_subsystem (
 				.clk_i, .rst_ni, .run_i(execution_run),
-				.program_valid_i(sxm_program_valid[HEMISPHERE_INDEX]),
-				.program_ready_o(sxm_program_ready[HEMISPHERE_INDEX]),
-				.program_control_i(outer_program_control[
+				.program_valid_i(sxm_program_valid_i[HEMISPHERE_INDEX]),
+				.program_ready_o(sxm_program_ready_o[HEMISPHERE_INDEX]),
+				.program_control_i(outer_program_control_i[
 					HEMISPHERE_INDEX*PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH]),
-				.program_destination_i(outer_program_destination[
+				.program_destination_i(outer_program_destination_i[
 					HEMISPHERE_INDEX*PROGRAM_DESTINATION_WIDTH+:PROGRAM_DESTINATION_WIDTH]),
-				.program_address_i(outer_program_address[HEMISPHERE_INDEX*17+:17]),
-				.program_data_i(outer_program_data[HEMISPHERE_INDEX*128+:128]),
-				.program_strb_i(outer_program_strb[HEMISPHERE_INDEX*4+:4]),
-				.program_last_i(outer_program_last[HEMISPHERE_INDEX]),
-				.program_error_o(sxm_program_error[HEMISPHERE_INDEX]),
-				.transpose_issue_valid_i(external_sxm_transpose_issue_valid_i[HEMISPHERE_INDEX]),
-				.transpose_issue_instruction_i(external_sxm_transpose_issue_instruction_i[HEMISPHERE_INDEX*416+:416]),
-				.permute_issue_valid_i(external_sxm_permute_issue_valid_i[HEMISPHERE_INDEX]),
-				.permute_issue_instruction_i(external_sxm_permute_issue_instruction_i[HEMISPHERE_INDEX*416+:416]),
+				.program_address_i(outer_program_address_i[HEMISPHERE_INDEX*17+:17]),
+				.program_data_i(outer_program_data_i[HEMISPHERE_INDEX*128+:128]),
+				.program_strb_i(outer_program_strb_i[HEMISPHERE_INDEX*4+:4]),
+				.program_last_i(outer_program_last_i[HEMISPHERE_INDEX]),
+				.program_error_o(sxm_program_error_o[HEMISPHERE_INDEX]),
+				.transpose_issue_valid_i(1'b0),
+				.transpose_issue_instruction_i('0),
+				.permute_issue_valid_i(1'b0),
+				.permute_issue_instruction_i('0),
 				.east_inner_valid_i(mem_east_valid), .east_inner_data_i(mem_east_data),
 				.east_outer_valid_o(sxm_east_valid), .east_outer_data_o(sxm_east_data),
 				.west_outer_valid_i(mxm_west_valid), .west_outer_data_i(mxm_west_data),
@@ -469,7 +379,7 @@ module lpu_fu_subsystem_cluster #(
 					.ACTIVE_CONTEXTS(ACTIVE_CONTEXTS),
 					.ACCUMULATOR_BLOCK_COUNT(MXM_ACCUMULATOR_BLOCK_COUNT)
 				) u_mxm_subsystem (
-					.clk_i, .rst_ni, .program_reset_i, .local_frontend_enable_i,
+					.clk_i, .rst_ni, .program_reset_i, .local_frontend_enable_i(1'b1),
 					.run_i(execution_run), .schedule_cycle_i(schedule_cycle_q),
 					.qctl_active_i({
 						qctl_queue_active_o[QCTL_MXM_COMPUTE_BASE+MXM_INDEX],
@@ -483,23 +393,23 @@ module lpu_fu_subsystem_cluster #(
 						qctl_queue_cycle[(QCTL_MXM_COMPUTE_BASE+MXM_INDEX)*32+:32],
 						qctl_queue_cycle[(QCTL_MXM_DEQUANT_BASE+MXM_INDEX)*32+:32],
 						qctl_queue_cycle[(QCTL_MXM_LOAD_BASE+MXM_INDEX)*32+:32]}),
-					.program_valid_i(mxm_program_valid[MXM_INDEX]),
-					.program_ready_o(mxm_program_ready[MXM_INDEX]),
-					.program_control_i(outer_program_control[
+					.program_valid_i(mxm_program_valid_i[MXM_INDEX]),
+					.program_ready_o(mxm_program_ready_o[MXM_INDEX]),
+					.program_control_i(outer_program_control_i[
 						HEMISPHERE_INDEX*PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH]),
-					.program_destination_i(outer_program_destination[
+					.program_destination_i(outer_program_destination_i[
 						HEMISPHERE_INDEX*PROGRAM_DESTINATION_WIDTH+:PROGRAM_DESTINATION_WIDTH]),
-					.program_address_i(outer_program_address[HEMISPHERE_INDEX*17+:17]),
-					.program_data_i(outer_program_data[HEMISPHERE_INDEX*128+:128]),
-					.program_strb_i(outer_program_strb[HEMISPHERE_INDEX*4+:4]),
-					.program_last_i(outer_program_last[HEMISPHERE_INDEX]),
-					.program_error_o(mxm_program_error[MXM_INDEX]),
-					.external_load_valid_i(external_mxm_load_issue_valid_i[MXM_INDEX]),
-					.external_load_instruction_i(external_mxm_load_issue_instruction_i[MXM_INDEX*48+:48]),
-					.external_dequant_valid_i(external_mxm_dequant_issue_valid_i[MXM_INDEX]),
-					.external_dequant_instruction_i(external_mxm_dequant_issue_instruction_i[MXM_INDEX*16+:16]),
-					.external_compute_valid_i(external_mxm_compute_issue_valid_i[MXM_INDEX]),
-					.external_compute_instruction_i(external_mxm_compute_issue_instruction_i[MXM_INDEX*48+:48]),
+					.program_address_i(outer_program_address_i[HEMISPHERE_INDEX*17+:17]),
+					.program_data_i(outer_program_data_i[HEMISPHERE_INDEX*128+:128]),
+					.program_strb_i(outer_program_strb_i[HEMISPHERE_INDEX*4+:4]),
+					.program_last_i(outer_program_last_i[HEMISPHERE_INDEX]),
+					.program_error_o(mxm_program_error_o[MXM_INDEX]),
+					.external_load_valid_i(1'b0),
+					.external_load_instruction_i('0),
+					.external_dequant_valid_i(1'b0),
+					.external_dequant_instruction_i('0),
+					.external_compute_valid_i(1'b0),
+					.external_compute_instruction_i('0),
 					.local_load_issue_valid_o(local_mxm_load_issue_valid_o[MXM_INDEX]),
 					.local_load_issue_instruction_o(local_mxm_load_issue_instruction_o[MXM_INDEX*29+:29]),
 					.local_load_issue_cycle_o(local_mxm_load_issue_cycle_o[MXM_INDEX*32+:32]),
@@ -562,19 +472,19 @@ module lpu_fu_subsystem_cluster #(
 
 	lpu_vxm_subsystem u_vxm_subsystem (
 		.clk_i, .rst_ni, .run_i(execution_run),
-		.program_valid_i(vxm_program_valid),
-		.program_ready_o(vxm_program_ready),
-		.program_control_i(vxm_program_control),
-		.program_destination_i(vxm_program_destination),
-		.program_address_i(vxm_program_address),
-		.program_data_i(vxm_program_data),
-		.program_strb_i(vxm_program_strb),
-		.program_last_i(vxm_program_last),
-		.program_error_o(vxm_program_error),
-		.local_issue_valid_i(external_vxm_local_issue_valid_i),
-		.local_issue_instruction_i(external_vxm_local_issue_instruction_i),
-		.global_issue_valid_i(external_vxm_global_issue_valid_i),
-		.global_issue_instruction_i(external_vxm_global_issue_instruction_i),
+		.program_valid_i(vxm_program_valid_i),
+		.program_ready_o(vxm_program_ready_o),
+		.program_control_i(vxm_program_control_i),
+		.program_destination_i(vxm_program_destination_i),
+		.program_address_i(vxm_program_address_i),
+		.program_data_i(vxm_program_data_i),
+		.program_strb_i(vxm_program_strb_i),
+		.program_last_i(vxm_program_last_i),
+		.program_error_o(vxm_program_error_o),
+		.local_issue_valid_i('0),
+		.local_issue_instruction_i('0),
+		.global_issue_valid_i(1'b0),
+		.global_issue_instruction_i('0),
 		.west_from_mem_valid_i(mem_to_vxm_west_valid),
 		.west_from_mem_data_i(mem_to_vxm_west_data),
 		.external_east_valid_i(mem_east_edge_valid_i),
