@@ -133,6 +133,7 @@ module lpu_mxm_frontend #(
     logic [STAGES-1:0] valid_q;
     logic [COMPUTE_INSTRUCTION_BITS-1:0] command_q[0:STAGES-1];
     logic [15:0] tag_q[0:STAGES-1];
+    // Delay Compute metadata to the matching column result without altering the in-flight command.
     always_ff @(posedge clk_i or negedge cell_reset_n) begin
       if(!cell_reset_n) begin
         valid_q<=0;
@@ -150,6 +151,7 @@ module lpu_mxm_frontend #(
     assign metadata_fault[c]=(valid_q[STAGES-1]!=result_valid_o[c]) ||
       (result_valid_o[c] && tag_q[STAGES-1]!=result_tag_o[c*16+:16]);
   end
+  // Input validity, paired Load/Dequant and result metadata mismatches remain sticky during RUN.
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if(!rst_ni) input_fault_q<=0;
     else if(!run_i) input_fault_q<=0;

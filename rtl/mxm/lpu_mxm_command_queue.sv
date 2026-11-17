@@ -19,6 +19,7 @@ module lpu_mxm_command_queue #(
   assign valid_o=count_q!=0;
   assign enqueue_ready_o=count_q<DEPTH || pop;
   assign data_o=valid_o?memory_q[read_q]:'0;
+  // Update storage, circular pointers and occupancy for accepted push and pop operations.
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if(!rst_ni) begin read_q<=0;write_q<=0;count_q<=0;end
     else begin

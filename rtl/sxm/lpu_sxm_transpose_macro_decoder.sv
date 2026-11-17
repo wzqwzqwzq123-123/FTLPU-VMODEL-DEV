@@ -73,6 +73,7 @@ module lpu_sxm_transpose_macro_decoder (
 	assign fault_o = fault_q;
 	assign fault_code_o = fault_code_q;
 
+	// Reassemble the packed RUN_2D payload from the two captured 96-bit Program Words.
 	always_comb begin
 		payload_w = '0;
 		for(integer bit_index = 0; bit_index < 172; bit_index++)begin
@@ -121,6 +122,7 @@ module lpu_sxm_transpose_macro_decoder (
 		native_instruction_w[410:408] = 3'd4;
 	end
 
+	// Collect one complete RUN_2D packet and hold it while the decoded Context is pending.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			word_index_q <= 1'b0;
@@ -148,6 +150,7 @@ module lpu_sxm_transpose_macro_decoder (
 		end
 	end
 
+	// Hold the decoded Transpose Context stable until the Scheduler accepts it.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			context_valid_q <= 1'b0;

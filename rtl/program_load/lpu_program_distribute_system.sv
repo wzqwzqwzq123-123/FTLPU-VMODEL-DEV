@@ -493,6 +493,7 @@ module lpu_program_distribute_system (
 		end
 	end
 
+	// Route faults remain sticky until reset so an invalid destination cannot be acknowledged later.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			route_fault_q <= 1'b0;

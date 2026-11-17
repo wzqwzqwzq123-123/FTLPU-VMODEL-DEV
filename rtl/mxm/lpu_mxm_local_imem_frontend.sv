@@ -276,6 +276,7 @@ module lpu_mxm_local_imem_frontend #(
 		end
 	end
 
+	// Local load and PRIME protocol violations remain sticky until the Queue-local reset.
 	always_ff @(posedge clk_i or negedge queue_rst_ni) begin
 		if(!queue_rst_ni)begin
 			fault_q <= 1'b0;

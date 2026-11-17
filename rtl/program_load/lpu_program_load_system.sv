@@ -237,6 +237,7 @@ module lpu_program_load_system #(
 		   (program_cmd_write_expected_word_count_i != program_cmd_write_byte_count_i / 16) ||
 		   ({1'b0, program_cmd_write_imem_base_address_i} + program_cmd_write_expected_word_count_i > MXM_IMEM_DEPTH))));
 
+	// Detect a repeated Program descriptor for the selected MEM or MXM destination.
 	always_comb begin
 		descriptor_duplicate_w = 1'b0;
 		if(program_cmd_write_fire && (program_cmd_write_opcode_i == PROGRAM_LOADER_LOAD_IMEM) && command_target_valid_w)begin

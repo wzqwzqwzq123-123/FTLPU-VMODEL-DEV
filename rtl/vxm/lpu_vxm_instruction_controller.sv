@@ -66,6 +66,7 @@ module lpu_vxm_instruction_controller #(
   logic output_enable_q;
   logic first_iteration_q;
 
+  // Drive resident configuration, Execute-token status and repeat metadata from the controller state.
   always_comb begin
     command_ready_o = (state_q == STATE_IDLE);
     local_config_load_o = (state_q == STATE_LOAD);

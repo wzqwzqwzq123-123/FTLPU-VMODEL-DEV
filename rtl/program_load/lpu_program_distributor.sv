@@ -159,6 +159,7 @@ module lpu_program_distributor #(
 		end
 	end
 
+	// Invalid scope or destination routing remains sticky until reset.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			fault_q <= 1'b0;

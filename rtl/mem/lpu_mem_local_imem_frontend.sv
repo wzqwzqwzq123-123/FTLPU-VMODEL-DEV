@@ -267,6 +267,7 @@ module lpu_mem_local_imem_frontend #(
 		end
 	end
 
+	// Local load and PRIME protocol violations remain sticky until the Frontend is reset.
 	always_ff @(posedge clk_i or negedge frontend_rst_ni) begin
 		if(!frontend_rst_ni)begin
 			fault_q <= 1'b0;

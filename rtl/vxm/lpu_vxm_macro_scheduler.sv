@@ -272,6 +272,7 @@ module lpu_vxm_macro_scheduler #(
 		end
 	end
 
+	// Track consecutive RUN cycles for absolute Schedule timebase validation.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			run_seen_q <= 1'b0;
@@ -286,6 +287,7 @@ module lpu_vxm_macro_scheduler #(
 		end
 	end
 
+	// Retain the first timing, queue or Context validation fault until reset.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			fault_q <= 1'b0;

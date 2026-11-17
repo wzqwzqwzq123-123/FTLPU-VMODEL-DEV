@@ -82,7 +82,7 @@ module lpu_mem_macro_scheduler #(
 	logic fault_q;
 	logic [3:0] fault_code_q;
 
-	// Input and storage control.
+	// A valid Context is captured into the first free Active Context slot when no fault blocks admission.
 	logic context_admit_fire;
 	logic free_slot_valid_w;
 	integer free_slot_index_w;
@@ -116,16 +116,26 @@ module lpu_mem_macro_scheduler #(
 	logic [32:0] lookahead_cycle_sum_w;
 	logic [31:0] lookahead_cycle_w;
 	logic lookahead_overflow_w;
+	// High when the due scan finds at least one Active Context for the current look-ahead cycle.
 	logic selected_context_found_w;
 	integer selected_index_w;
 	integer due_count_w;
+	// High when any Active Context deadline is earlier than the look-ahead cycle, making on-time generation impossible.
 	logic missed_generation_w;
+	// High when exactly one generated instruction is accepted by the FU-local Instruction Queue without a fault.
 	logic schedule_select_fire;
+	// High after queue acceptance when inner iterations remain; advances address, count and next issue cycle once.
+	logic active_context_inner_advance_w;
+	// High after queue acceptance on the last inner iteration while outer rows remain; starts the next row once.
+	logic active_context_outer_advance_w;
+	// High after queue acceptance on the final inner and outer iteration; releases the selected Active Context slot.
+	logic active_context_retire_w;
 
 	// Instruction Queue handoff. Backpressure at the look-ahead cycle is terminal.
 	logic instruction_queue_blocked_w;
 	// Fault arbitration is explicit so the first hardware contract violation is retained.
 	logic timebase_violation_w;
+	// High when fault arbitration finds an input or runtime contract violation; blocks transfers and latches terminal fault state.
 	logic dynamic_fault_w;
 	logic [3:0] dynamic_fault_code_w;
 	logic prime_mode_w;
@@ -175,7 +185,7 @@ module lpu_mem_macro_scheduler #(
 	assign conflict_o = fault_q ? (fault_code_q == FAULT_CONFLICT) : (scheduler_active_w && due_count_w > 1);
 	assign idle_o = active_count_o == '0;
 
-	// Convert Count/Interval/Stride once before the Context enters active storage.
+	// Normalize iteration counts and the degenerate one-entry inner-loop parameters before admission.
 	always_comb begin
 		schedule_inner_steps_w = '0;
 		schedule_outer_steps_w = '0;
@@ -187,12 +197,20 @@ module lpu_mem_macro_scheduler #(
 		end
 		schedule_effective_inner_interval_w = (context_inner_count_i == 32'd1) ? 32'd1 : context_inner_interval_i;
 		schedule_effective_inner_step_w = (context_inner_count_i == 32'd1) ? 65'sd0 : $signed(context_inner_stride_i);
+	end
+
+	// Calculate the absolute cycle span, final deadline and outer-loop residual interval.
+	always_comb begin
 		schedule_inner_cycle_span_w = {1'b0, schedule_inner_steps_w} * {33'd0, schedule_effective_inner_interval_w};
 		schedule_outer_cycle_span_w = {1'b0, schedule_outer_steps_w} * {33'd0, context_outer_interval_i};
 		schedule_final_cycle_w = {33'd0, context_start_cycle_i} + schedule_inner_cycle_span_w + schedule_outer_cycle_span_w;
+		schedule_outer_residual_w = (context_outer_count_i == 32'd1) ? 32'd1 : context_outer_interval_i - schedule_inner_cycle_span_w[31:0];
+	end
+
+	// Convert the affine inner and outer strides into per-issue address update steps.
+	always_comb begin
 		schedule_inner_operand_span_w = $signed({1'b0, schedule_inner_steps_w}) * schedule_effective_inner_step_w;
 		schedule_row_transition_w = (context_outer_count_i == 32'd1) ? 65'sd0 : $signed(context_outer_stride_i) - schedule_inner_operand_span_w;
-		schedule_outer_residual_w = (context_outer_count_i == 32'd1) ? 32'd1 : context_outer_interval_i - schedule_inner_cycle_span_w[31:0];
 	end
 
 	// Affine address extrema occur at the four two-dimensional loop corners.
@@ -207,23 +225,38 @@ module lpu_mem_macro_scheduler #(
 			(address_inner_outer_corner_w < MIN_MEM_ADDRESS) || (address_inner_outer_corner_w > MAX_MEM_ADDRESS);
 	end
 
-	// Runtime admission needs enough lead for Active RAM visibility, Select and Issue FIFO stages.
+	// Validate the restored native MEM instruction and its address field before admission.
 	always_comb begin
-		context_min_start_cycle_w = {1'b0, schedule_cycle_i} + ISSUE_LOOKAHEAD + 1;
 		native_instruction_illegal_w = (context_instruction_i[30:28] != 3'd0) ||
 			!((context_instruction_i[2:0] == 3'd0) || (context_instruction_i[2:0] == 3'd1) ||
 			(context_instruction_i[2:0] == 3'd3) || (context_instruction_i[2:0] == 3'd4)) ||
 			(context_instruction_i[31] && (context_instruction_i[2:0] != 3'd1)) ||
 			(context_instruction_i[27:15] != context_address_i);
+	end
+
+	// Validate loop counts, intervals and the representable final absolute issue cycle.
+	always_comb begin
 		iteration_parameters_illegal_w = (context_inner_count_i == 0) || (context_inner_count_i > MAX_CONTEXT_COUNT) ||
 			(context_outer_count_i == 0) || (context_outer_count_i > MAX_CONTEXT_COUNT) ||
 			(context_inner_interval_i == 0) || (context_outer_interval_i == 0) ||
 			((context_outer_count_i > 1) && ({33'd0, context_outer_interval_i} <= schedule_inner_cycle_span_w));
+		cycle_range_violation_w = schedule_final_cycle_w[64:32] != 0;
+	end
+
+	// Validate the converted inner step and row transition against Active Context storage widths.
+	always_comb begin
 		step_parameters_illegal_w = (schedule_effective_inner_step_w < MIN_CONTEXT_STEP) || (schedule_effective_inner_step_w > MAX_CONTEXT_STEP) ||
 			(schedule_row_transition_w < MIN_CONTEXT_STEP) || (schedule_row_transition_w > MAX_CONTEXT_STEP);
-		cycle_range_violation_w = schedule_final_cycle_w[64:32] != 0;
-		context_late_w = run_i && (context_min_start_cycle_w[32] || ({1'b0, context_start_cycle_i} < context_min_start_cycle_w));
+	end
 
+	// Check that a runtime Context arrives early enough for admission, selection and queue insertion.
+	always_comb begin
+		context_min_start_cycle_w = {1'b0, schedule_cycle_i} + ISSUE_LOOKAHEAD + 1;
+		context_late_w = run_i && (context_min_start_cycle_w[32] || ({1'b0, context_start_cycle_i} < context_min_start_cycle_w));
+	end
+
+	// Select the highest-priority admission fault without changing the established fault-code ordering.
+	always_comb begin
 		context_illegal_w = 1'b0;
 		context_fault_code_w = FAULT_NONE;
 		if(context_induction_target_i != MEM_ADDRESS_TARGET)begin
@@ -268,19 +301,31 @@ module lpu_mem_macro_scheduler #(
 		end
 	end
 
-	// Due scan is performed ISSUE_LOOKAHEAD cycles ahead so Issue output is registered before its deadline.
+	// Form the absolute cycle inspected by the look-ahead selection logic.
 	always_comb begin
 		lookahead_cycle_sum_w = prime_mode_w ? 33'd0 : ({1'b0, schedule_cycle_i} + ISSUE_LOOKAHEAD);
 		lookahead_cycle_w = lookahead_cycle_sum_w[31:0];
 		lookahead_overflow_w = lookahead_cycle_sum_w[32];
-		selected_context_found_w = 1'b0;
-		selected_index_w = 0;
-		due_count_w = 0;
-		missed_generation_w = 1'b0;
+	end
+
+	// Count occupied Active Context slots independently from deadline selection.
+	always_comb begin
 		active_count_o = '0;
 		for(integer slot = 0; slot < ACTIVE_CONTEXTS; slot = slot + 1)begin
 			if(active_valid_q[slot])begin
 				active_count_o = active_count_o + 1'b1;
+			end
+		end
+	end
+
+	// Select the first Context due at the look-ahead cycle and detect conflicts or missed generation points.
+	always_comb begin
+		selected_context_found_w = 1'b0;
+		selected_index_w = 0;
+		due_count_w = 0;
+		missed_generation_w = 1'b0;
+		for(integer slot = 0; slot < ACTIVE_CONTEXTS; slot = slot + 1)begin
+			if(active_valid_q[slot])begin
 				if(active_next_issue_cycle_q[slot] < lookahead_cycle_w)begin
 					missed_generation_w = 1'b1;
 				end
@@ -342,12 +387,20 @@ module lpu_mem_macro_scheduler #(
 	assign context_ready_o = free_slot_valid_w && !fault_q && !dynamic_fault_w;
 	assign context_admit_fire = context_valid_i && context_ready_o;
 	assign schedule_select_fire = issue_valid_o && issue_ready_i && !dynamic_fault_w;
+	assign active_context_inner_advance_w = schedule_select_fire &&
+		(active_inner_remaining_q[selected_index_w] > 32'd1);
+	assign active_context_outer_advance_w = schedule_select_fire &&
+		(active_inner_remaining_q[selected_index_w] <= 32'd1) &&
+		(active_outer_remaining_q[selected_index_w] > 32'd1);
+	assign active_context_retire_w = schedule_select_fire &&
+		(active_inner_remaining_q[selected_index_w] <= 32'd1) &&
+		(active_outer_remaining_q[selected_index_w] <= 32'd1);
 	assign prime_ready_o = prime_mode_w && !context_valid_i &&
 		(due_count_w == 0) && !fault_q && !dynamic_fault_w;
 	assign fault_o = fault_q || dynamic_fault_w;
 	assign fault_code_o = fault_q ? fault_code_q : dynamic_fault_code_w;
 
-	// Context state advances only when the FU-local Instruction Queue accepts the generated instruction.
+	// Active Context state advances atomically on queue acceptance, while new Context admission uses a free slot.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			for(integer slot = 0; slot < ACTIVE_CONTEXTS; slot = slot + 1)begin
@@ -355,23 +408,23 @@ module lpu_mem_macro_scheduler #(
 			end
 		end
 		else begin
-			if(schedule_select_fire)begin
-				if(active_inner_remaining_q[selected_index_w] > 32'd1)begin
-					active_inner_remaining_q[selected_index_w] <= active_inner_remaining_q[selected_index_w] - 1'b1;
-					active_next_issue_cycle_q[selected_index_w] <= active_next_issue_cycle_q[selected_index_w] + active_inner_interval_q[selected_index_w];
-					active_address_q[selected_index_w] <= add_mem_address_step(active_address_q[selected_index_w], active_inner_step_q[selected_index_w]);
-				end
-				else if(active_outer_remaining_q[selected_index_w] > 32'd1)begin
-					active_outer_remaining_q[selected_index_w] <= active_outer_remaining_q[selected_index_w] - 1'b1;
-					active_inner_remaining_q[selected_index_w] <= active_inner_count_q[selected_index_w];
-					active_next_issue_cycle_q[selected_index_w] <= active_next_issue_cycle_q[selected_index_w] + active_outer_residual_q[selected_index_w];
-					active_address_q[selected_index_w] <= add_mem_address_step(active_address_q[selected_index_w], active_row_transition_q[selected_index_w]);
-				end
-				else begin
-					active_valid_q[selected_index_w] <= 1'b0;
-				end
+			// Existing Active Context Advance / Retirement
+			if(active_context_inner_advance_w)begin
+				active_inner_remaining_q[selected_index_w] <= active_inner_remaining_q[selected_index_w] - 1'b1;
+				active_next_issue_cycle_q[selected_index_w] <= active_next_issue_cycle_q[selected_index_w] + active_inner_interval_q[selected_index_w];
+				active_address_q[selected_index_w] <= add_mem_address_step(active_address_q[selected_index_w], active_inner_step_q[selected_index_w]);
+			end
+			else if(active_context_outer_advance_w)begin
+				active_outer_remaining_q[selected_index_w] <= active_outer_remaining_q[selected_index_w] - 1'b1;
+				active_inner_remaining_q[selected_index_w] <= active_inner_count_q[selected_index_w];
+				active_next_issue_cycle_q[selected_index_w] <= active_next_issue_cycle_q[selected_index_w] + active_outer_residual_q[selected_index_w];
+				active_address_q[selected_index_w] <= add_mem_address_step(active_address_q[selected_index_w], active_row_transition_q[selected_index_w]);
+			end
+			else if(active_context_retire_w)begin
+				active_valid_q[selected_index_w] <= 1'b0;
 			end
 
+			// New Active Context Admission
 			if(context_admit_fire)begin
 				active_valid_q[free_slot_index_w] <= 1'b1;
 				active_instruction_q[free_slot_index_w] <= context_instruction_i;

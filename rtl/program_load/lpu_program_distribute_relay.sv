@@ -179,6 +179,7 @@ module lpu_program_distribute_relay #(
 	assign chain_record_ready_o = !fault_q && !route_invalid_w && (level_q < BUFFER_DEPTH);
 	assign enqueue_fire_w = chain_record_valid_i && chain_record_ready_o;
 
+	// Present the buffered head record only to the decoded local endpoint bank.
 	always_comb begin
 		local_endpoint_valid_o = '0;
 		if(head_valid_w && local_endpoint_route_w && !route_invalid_w && !fault_q)begin
@@ -221,6 +222,7 @@ module lpu_program_distribute_relay #(
 		end
 	end
 
+	// Read and write pointers advance independently on accepted enqueue and dequeue transfers.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			write_ptr_q <= '0;
@@ -236,6 +238,7 @@ module lpu_program_distribute_relay #(
 		end
 	end
 
+	// Occupancy tracks enqueue-only and dequeue-only cycles while remaining stable on simultaneous transfers.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			level_q <= '0;

@@ -97,6 +97,7 @@ module lpu_mxm_local_coordinator (
 	assign compute_issue_valid_o = compute_valid_i && !fault_q && !dynamic_fault_w;
 	assign compute_ready_o = compute_issue_ready_i && !fault_q && !dynamic_fault_w;
 
+	// Prioritize source-cycle, paired-cycle and missing-pair violations for the current transfer.
 	always_comb begin
 		dynamic_fault_w = 1'b0;
 		dynamic_fault_code_w = FAULT_NONE;

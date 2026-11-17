@@ -250,6 +250,7 @@ module lpu_program_load_path #(
 	assign fault_code_o = dma_fault ? dma_fault_code :
 		(reassembler_fault ? reassembler_fault_code : PROGRAM_FAULT_NONE);
 
+	// Count each reconstructed Program Word accepted by the downstream Word FIFO.
 	always_ff @(posedge clk_i or negedge internal_rst_ni) begin
 		if(!internal_rst_ni)begin
 			generated_word_count_q <= '0;

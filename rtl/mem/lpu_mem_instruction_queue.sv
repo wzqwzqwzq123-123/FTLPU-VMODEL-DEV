@@ -57,6 +57,7 @@ module lpu_mem_instruction_queue #(
 		.dequeue_ready_i(fifo_dequeue_ready), .dequeue_data_o(fifo_dequeue_data), .level_o
 	);
 
+	// Deadline, late-head and blocked-issue violations remain sticky until reset.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			fault_q <= 1'b0;

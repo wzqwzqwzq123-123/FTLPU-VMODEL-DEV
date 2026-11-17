@@ -117,6 +117,7 @@ module lpu_mxm_local_imem #(
 		end
 	end
 
+	// Track accepted requests that have not yet retired from the response FIFO.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			outstanding_q <= '0;
@@ -130,6 +131,7 @@ module lpu_mxm_local_imem #(
 		end
 	end
 
+	// Request ordering and outstanding-count violations remain sticky until reset.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			fault_q <= 1'b0;

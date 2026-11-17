@@ -68,6 +68,7 @@ module lpu_mxm_issue_queue #(
 		.level_o
 	);
 
+	// Deadline, late-head and blocked-issue violations remain sticky until reset.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			fault_q <= 1'b0;

@@ -147,6 +147,7 @@ module lpu_sxm_permute_macro_scheduler #(
 
 	assign map_delta_w = active_linear_index_q * active_map_stride_q;
 
+	// Apply the linear launch-index delta to every encoded Permute lane mapping field.
 	always_comb begin
 		selected_instruction_w = active_instruction_q;
 		for(integer lane = 0; lane < 32; lane = lane + 1)begin
@@ -200,6 +201,7 @@ module lpu_sxm_permute_macro_scheduler #(
 	assign fault_o = fault_q || dynamic_fault_w;
 	assign fault_code_o = fault_q ? fault_code_q : dynamic_fault_code_w;
 
+	// Buffer one decoded Context until the Active Context slot can accept it.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			ingress_valid_q <= 1'b0;
@@ -258,6 +260,7 @@ module lpu_sxm_permute_macro_scheduler #(
 		end
 	end
 
+	// Track consecutive RUN cycles for absolute Schedule timebase validation.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			run_seen_q <= 1'b0;
@@ -272,6 +275,7 @@ module lpu_sxm_permute_macro_scheduler #(
 		end
 	end
 
+	// Retain the first timing, queue or Context validation fault until reset.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			fault_q <= 1'b0;
