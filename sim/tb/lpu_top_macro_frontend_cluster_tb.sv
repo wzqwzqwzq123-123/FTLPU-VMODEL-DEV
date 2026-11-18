@@ -9,7 +9,7 @@ module lpu_top_macro_frontend_cluster_tb;
 	localparam integer COMMAND_DEPTH = 16;
 	localparam integer COMMAND_ADDRESS_WIDTH = $clog2(COMMAND_DEPTH);
 	localparam logic [1:0] PROGRAM_ENCODING_MACRO = 2'd0;
-	localparam logic [95:0] MEM_WORD_0 = 96'h00000000_00000000_00000027;
+	localparam logic [95:0] MEM_WORD_0 = 96'h00000000_00000000_00000025;
 	localparam logic [95:0] MEM_WORD_1 = 96'h00303200_00000180_02000021;
 	localparam logic [95:0] MEM_WORD_2 = 96'h00000000_00000000_00000400;
 	localparam logic [127:0] MXM_CONTROL = 128'h00000000000000000000000000000017;
@@ -18,35 +18,35 @@ module lpu_top_macro_frontend_cluster_tb;
 	logic clk;
 	logic rst_n;
 	logic program_reset;
-	logic program_command_write_valid;
-	logic program_command_write_ready;
-	logic [COMMAND_ADDRESS_WIDTH-1:0] program_command_write_address;
-	logic [2:0] program_command_write_opcode;
-	logic [63:0] program_command_write_source_address;
-	logic [31:0] program_command_write_byte_count;
-	logic [11:0] program_command_write_destination;
-	logic [1:0] program_command_write_format;
-	logic [1:0] program_command_write_encoding_mode;
-	logic [16:0] program_command_write_imem_base_address;
-	logic program_command_write_image_first;
-	logic program_command_write_image_last;
-	logic [15:0] program_command_write_expected_word_count;
-	logic [COMMAND_ADDRESS_WIDTH-1:0] program_command_write_jump_address;
+	logic program_cmd_write_valid;
+	logic program_cmd_write_ready;
+	logic [COMMAND_ADDRESS_WIDTH-1:0] program_cmd_write_address;
+	logic [2:0] program_cmd_write_opcode;
+	logic [63:0] program_cmd_write_source_address;
+	logic [31:0] program_cmd_write_byte_count;
+	logic [11:0] program_cmd_write_destination;
+	logic [1:0] program_cmd_write_format;
+	logic [1:0] program_cmd_write_encoding_mode;
+	logic [16:0] program_cmd_write_imem_base_address;
+	logic program_cmd_write_image_first;
+	logic program_cmd_write_image_last;
+	logic [15:0] program_cmd_write_expected_word_count;
+	logic [COMMAND_ADDRESS_WIDTH-1:0] program_cmd_write_jump_address;
 	logic program_load_start_valid;
 	logic program_load_start_ready;
 	logic [COMMAND_ADDRESS_WIDTH:0] program_load_start_command_count;
-	logic program_dma_cmd_valid;
-	logic program_dma_cmd_ready;
-	logic [63:0] program_dma_cmd_address;
-	logic [31:0] program_dma_cmd_length;
-	logic [7:0] program_dma_cmd_id;
-	logic program_dma_rsp_valid;
-	logic program_dma_rsp_ready;
-	logic [255:0] program_dma_rsp_data;
-	logic [31:0] program_dma_rsp_keep;
-	logic program_dma_rsp_last;
-	logic [7:0] program_dma_rsp_id;
-	logic program_dma_rsp_error;
+	logic program_ddr_read_req_valid;
+	logic program_ddr_read_req_ready;
+	logic [63:0] program_ddr_read_req_address;
+	logic [31:0] program_ddr_read_req_length;
+	logic [7:0] program_ddr_read_req_id;
+	logic program_ddr_read_rsp_valid;
+	logic program_ddr_read_rsp_ready;
+	logic [255:0] program_ddr_read_rsp_data;
+	logic [31:0] program_ddr_read_rsp_keep;
+	logic program_ddr_read_rsp_last;
+	logic [7:0] program_ddr_read_rsp_id;
+	logic program_ddr_read_rsp_error;
 	logic program_start_request;
 	logic program_start_ack;
 	logic program_load_complete;
@@ -56,10 +56,6 @@ module lpu_top_macro_frontend_cluster_tb;
 	logic program_fault;
 	logic [5:0] program_fault_code;
 	logic [31:0] program_schedule_cycle;
-	logic schedule_ready;
-	logic [137:0] dispatch_valid;
-	logic [138*416-1:0] dispatch_payload;
-	logic [137:0] queue_fault;
 
 	integer next_command;
 	integer checks;
@@ -101,10 +97,8 @@ module lpu_top_macro_frontend_cluster_tb;
 	endfunction
 
 	lpu_top #(
-		.ICU_QUEUE_DEPTH(4),
 		.MEM_DEPTH_ROWS(256),
 		.ACTIVE_MEM_COLUMNS(1),
-		.ENABLE_DISTRIBUTED_PROGRAM_FRONTEND(1'b1),
 		.PROGRAM_COMMAND_DEPTH(COMMAND_DEPTH),
 		.PROGRAM_MEM_IMEM_DEPTH(16),
 		.PROGRAM_MXM_IMEM_DEPTH(16),
@@ -112,43 +106,36 @@ module lpu_top_macro_frontend_cluster_tb;
 	) u_dut (
 		.clk_i(clk),
 		.rst_ni(rst_n),
-		.run_i(1'b0),
-		.schedule_valid_i(1'b0),
-		.schedule_ready_o(schedule_ready),
-		.schedule_queue_i('0),
-		.schedule_is_instruction_i(1'b0),
-		.schedule_command_i('0),
-		.schedule_payload_i('0),
 		.program_reset_i(program_reset),
-		.program_command_write_valid_i(program_command_write_valid),
-		.program_command_write_ready_o(program_command_write_ready),
-		.program_command_write_address_i(program_command_write_address),
-		.program_command_write_opcode_i(program_command_write_opcode),
-		.program_command_write_source_address_i(program_command_write_source_address),
-		.program_command_write_byte_count_i(program_command_write_byte_count),
-		.program_command_write_destination_i(program_command_write_destination),
-		.program_command_write_format_i(program_command_write_format),
-		.program_command_write_encoding_mode_i(program_command_write_encoding_mode),
-		.program_command_write_imem_base_address_i(program_command_write_imem_base_address),
-		.program_command_write_image_first_i(program_command_write_image_first),
-		.program_command_write_image_last_i(program_command_write_image_last),
-		.program_command_write_expected_word_count_i(program_command_write_expected_word_count),
-		.program_command_write_jump_address_i(program_command_write_jump_address),
+		.program_cmd_write_valid_i(program_cmd_write_valid),
+		.program_cmd_write_ready_o(program_cmd_write_ready),
+		.program_cmd_write_address_i(program_cmd_write_address),
+		.program_cmd_write_opcode_i(program_cmd_write_opcode),
+		.program_cmd_write_source_address_i(program_cmd_write_source_address),
+		.program_cmd_write_byte_count_i(program_cmd_write_byte_count),
+		.program_cmd_write_destination_i(program_cmd_write_destination),
+		.program_cmd_write_format_i(program_cmd_write_format),
+		.program_cmd_write_encoding_mode_i(program_cmd_write_encoding_mode),
+		.program_cmd_write_imem_base_address_i(program_cmd_write_imem_base_address),
+		.program_cmd_write_image_first_i(program_cmd_write_image_first),
+		.program_cmd_write_image_last_i(program_cmd_write_image_last),
+		.program_cmd_write_expected_word_count_i(program_cmd_write_expected_word_count),
+		.program_cmd_write_jump_address_i(program_cmd_write_jump_address),
 		.program_load_start_valid_i(program_load_start_valid),
 		.program_load_start_ready_o(program_load_start_ready),
 		.program_load_start_command_count_i(program_load_start_command_count),
-		.program_dma_cmd_valid_o(program_dma_cmd_valid),
-		.program_dma_cmd_ready_i(program_dma_cmd_ready),
-		.program_dma_cmd_address_o(program_dma_cmd_address),
-		.program_dma_cmd_length_o(program_dma_cmd_length),
-		.program_dma_cmd_id_o(program_dma_cmd_id),
-		.program_dma_rsp_valid_i(program_dma_rsp_valid),
-		.program_dma_rsp_ready_o(program_dma_rsp_ready),
-		.program_dma_rsp_data_i(program_dma_rsp_data),
-		.program_dma_rsp_keep_i(program_dma_rsp_keep),
-		.program_dma_rsp_last_i(program_dma_rsp_last),
-		.program_dma_rsp_id_i(program_dma_rsp_id),
-		.program_dma_rsp_error_i(program_dma_rsp_error),
+		.program_ddr_read_req_valid_o(program_ddr_read_req_valid),
+		.program_ddr_read_req_ready_i(program_ddr_read_req_ready),
+		.program_ddr_read_req_address_o(program_ddr_read_req_address),
+		.program_ddr_read_req_length_o(program_ddr_read_req_length),
+		.program_ddr_read_req_id_o(program_ddr_read_req_id),
+		.program_ddr_read_rsp_valid_i(program_ddr_read_rsp_valid),
+		.program_ddr_read_rsp_ready_o(program_ddr_read_rsp_ready),
+		.program_ddr_read_rsp_data_i(program_ddr_read_rsp_data),
+		.program_ddr_read_rsp_keep_i(program_ddr_read_rsp_keep),
+		.program_ddr_read_rsp_last_i(program_ddr_read_rsp_last),
+		.program_ddr_read_rsp_id_i(program_ddr_read_rsp_id),
+		.program_ddr_read_rsp_error_i(program_ddr_read_rsp_error),
 		.program_start_request_i(program_start_request),
 		.program_dependencies_ready_i(1'b1),
 		.program_start_ack_o(program_start_ack),
@@ -170,13 +157,10 @@ module lpu_top_macro_frontend_cluster_tb;
 		.qctl_load_ready_o(),
 		.qctl_load_address_i('0),
 		.qctl_load_data_i('0),
+		.qctl_sync_participant_mask_i('0),
 		.qctl_event_valid_i('0),
 		.qctl_event_ready_o(),
 		.qctl_event_tag_i('0),
-		.qctl_sync_valid_i('0),
-		.qctl_sync_ready_o(),
-		.qctl_notify_valid_o(),
-		.qctl_notify_ready_i('0),
 		.qctl_mem_packet_valid_o(),
 		.qctl_mem_packet_ordinal_o(),
 		.qctl_mem_packet_retired_i('0),
@@ -195,9 +179,6 @@ module lpu_top_macro_frontend_cluster_tb;
 		.mem_west_edge_data_i('0),
 		.mem_west_edge_valid_o(),
 		.mem_west_edge_data_o(),
-		.dispatch_valid_o(dispatch_valid),
-		.dispatch_payload_o(dispatch_payload),
-		.queue_fault_o(queue_fault),
 		.mem_fault_o(),
 		.mxm_fault_o(),
 		.sxm_fault_o(),
@@ -240,23 +221,23 @@ module lpu_top_macro_frontend_cluster_tb;
 	);
 		begin
 			@(negedge clk);
-			program_command_write_address = address[COMMAND_ADDRESS_WIDTH-1:0];
-			program_command_write_opcode = opcode;
-			program_command_write_source_address = source_address;
-			program_command_write_byte_count = byte_count;
-			program_command_write_destination = destination;
-			program_command_write_format = format;
-			program_command_write_encoding_mode = PROGRAM_ENCODING_MACRO;
-			program_command_write_imem_base_address = '0;
-			program_command_write_image_first = 1'b1;
-			program_command_write_image_last = 1'b1;
-			program_command_write_expected_word_count = expected_words;
-			program_command_write_jump_address = '0;
-			program_command_write_valid = 1'b1;
-			check(program_command_write_ready, "Program command RAM accepts descriptor");
+			program_cmd_write_address = address[COMMAND_ADDRESS_WIDTH-1:0];
+			program_cmd_write_opcode = opcode;
+			program_cmd_write_source_address = source_address;
+			program_cmd_write_byte_count = byte_count;
+			program_cmd_write_destination = destination;
+			program_cmd_write_format = format;
+			program_cmd_write_encoding_mode = PROGRAM_ENCODING_MACRO;
+			program_cmd_write_imem_base_address = '0;
+			program_cmd_write_image_first = 1'b1;
+			program_cmd_write_image_last = 1'b1;
+			program_cmd_write_expected_word_count = expected_words;
+			program_cmd_write_jump_address = '0;
+			program_cmd_write_valid = 1'b1;
+			check(program_cmd_write_ready, "Program command RAM accepts descriptor");
 			@(posedge clk);
 			@(negedge clk);
-			program_command_write_valid = 1'b0;
+			program_cmd_write_valid = 1'b0;
 		end
 	endtask
 
@@ -309,20 +290,20 @@ module lpu_top_macro_frontend_cluster_tb;
 	);
 		begin
 			@(negedge clk);
-			program_dma_rsp_data = data;
-			program_dma_rsp_keep = keep;
-			program_dma_rsp_last = last;
-			program_dma_rsp_id = id;
-			program_dma_rsp_valid = 1'b1;
+			program_ddr_read_rsp_data = data;
+			program_ddr_read_rsp_keep = keep;
+			program_ddr_read_rsp_last = last;
+			program_ddr_read_rsp_id = id;
+			program_ddr_read_rsp_valid = 1'b1;
 			timeout = 0;
-			while(!program_dma_rsp_ready && timeout < 100)begin
+			while(!program_ddr_read_rsp_ready && timeout < 100)begin
 				@(negedge clk);
 				timeout = timeout + 1;
 			end
-			check(program_dma_rsp_ready, "DMA response accepted under ready/valid");
+			check(program_ddr_read_rsp_ready, "DMA response accepted under ready/valid");
 			@(posedge clk);
 			@(negedge clk);
-			program_dma_rsp_valid = 1'b0;
+			program_ddr_read_rsp_valid = 1'b0;
 		end
 	endtask
 
@@ -334,19 +315,19 @@ module lpu_top_macro_frontend_cluster_tb;
 		logic [7:0] dma_id;
 		begin
 			timeout = 0;
-			while(!program_dma_cmd_valid && timeout < 500)begin
+			while(!program_ddr_read_req_valid && timeout < 500)begin
 				@(negedge clk);
 				timeout = timeout + 1;
 			end
-			check(program_dma_cmd_valid, "Program Loader emits DMA command");
-			check(program_dma_cmd_address == expected_address &&
-				program_dma_cmd_length == byte_count,
+			check(program_ddr_read_req_valid, "Program Loader emits DMA command");
+			check(program_ddr_read_req_address == expected_address &&
+				program_ddr_read_req_length == byte_count,
 				"Program descriptor preserves source address and byte count");
-			dma_id = program_dma_cmd_id;
-			program_dma_cmd_ready = 1'b1;
+			dma_id = program_ddr_read_req_id;
+			program_ddr_read_req_ready = 1'b1;
 			@(posedge clk);
 			@(negedge clk);
-			program_dma_cmd_ready = 1'b0;
+			program_ddr_read_req_ready = 1'b0;
 			if(byte_count <= 32)begin
 				send_dma_beat(image[0+:256], 32'hffff_ffff >> (32-byte_count), 1'b1, dma_id);
 			end
@@ -385,28 +366,28 @@ module lpu_top_macro_frontend_cluster_tb;
 		clk = 1'b0;
 		rst_n = 1'b0;
 		program_reset = 1'b0;
-		program_command_write_valid = 1'b0;
-		program_command_write_address = '0;
-		program_command_write_opcode = '0;
-		program_command_write_source_address = '0;
-		program_command_write_byte_count = '0;
-		program_command_write_destination = '0;
-		program_command_write_format = '0;
-		program_command_write_encoding_mode = '0;
-		program_command_write_imem_base_address = '0;
-		program_command_write_image_first = 1'b0;
-		program_command_write_image_last = 1'b0;
-		program_command_write_expected_word_count = '0;
-		program_command_write_jump_address = '0;
+		program_cmd_write_valid = 1'b0;
+		program_cmd_write_address = '0;
+		program_cmd_write_opcode = '0;
+		program_cmd_write_source_address = '0;
+		program_cmd_write_byte_count = '0;
+		program_cmd_write_destination = '0;
+		program_cmd_write_format = '0;
+		program_cmd_write_encoding_mode = '0;
+		program_cmd_write_imem_base_address = '0;
+		program_cmd_write_image_first = 1'b0;
+		program_cmd_write_image_last = 1'b0;
+		program_cmd_write_expected_word_count = '0;
+		program_cmd_write_jump_address = '0;
 		program_load_start_valid = 1'b0;
 		program_load_start_command_count = '0;
-		program_dma_cmd_ready = 1'b0;
-		program_dma_rsp_valid = 1'b0;
-		program_dma_rsp_data = '0;
-		program_dma_rsp_keep = '0;
-		program_dma_rsp_last = 1'b0;
-		program_dma_rsp_id = '0;
-		program_dma_rsp_error = 1'b0;
+		program_ddr_read_req_ready = 1'b0;
+		program_ddr_read_rsp_valid = 1'b0;
+		program_ddr_read_rsp_data = '0;
+		program_ddr_read_rsp_keep = '0;
+		program_ddr_read_rsp_last = 1'b0;
+		program_ddr_read_rsp_id = '0;
+		program_ddr_read_rsp_error = 1'b0;
 		program_start_request = 1'b0;
 		next_command = 0;
 		checks = 0;
@@ -419,7 +400,6 @@ module lpu_top_macro_frontend_cluster_tb;
 		@(negedge clk);
 		rst_n = 1'b1;
 
-		check(!schedule_ready, "Legacy Schedule input is disabled in Program mode");
 		check(program_destination_pack(PROGRAM_HEMISPHERE_EAST,
 			PROGRAM_TARGET_MEM, 8'd0) == 12'h000,
 			"12-bit Destination encodes East MEM Queue 0");
@@ -458,26 +438,26 @@ module lpu_top_macro_frontend_cluster_tb;
 		timeout = 0;
 		while((mem_issue_seen == 0 || mxm_issue_seen == 0) && timeout < 100)begin
 			@(negedge clk);
-			if(dispatch_valid[0])begin
+			if(u_dut.local_mem_issue_valid[0])begin
 				mem_issue_seen = mem_issue_seen + 1;
 				check(program_schedule_cycle == 3,
 					"MEM Macro instruction issues at absolute Cycle 3");
-				check(dispatch_payload[15+:13] == 13'd100,
+				check(u_dut.local_mem_issue_instruction[15+:13] == 13'd100,
 					"MEM Macro preserves decoded address 100");
 			end
-			if(dispatch_valid[lpu_pkg::MXM_LOAD_QUEUE_BASE])begin
+			if(u_dut.local_mxm_load_issue_valid[0])begin
 				mxm_issue_seen = mxm_issue_seen + 1;
 				check(program_schedule_cycle == 5,
 					"MXM Load Macro instruction issues at absolute Cycle 5");
-				check(dispatch_payload[lpu_pkg::MXM_LOAD_QUEUE_BASE*416+:29] == 29'h00000008,
+				check(u_dut.local_mxm_load_issue_instruction[0+:29] == 29'h00000008,
 					"MXM Load Macro preserves decoded native instruction");
 			end
 			timeout = timeout + 1;
 		end
 		check(mem_issue_seen == 1 && mxm_issue_seen == 1,
 			"Each current Macro Frontend issues exactly once");
-		check(queue_fault == '0 && !program_fault,
-			"Current MEM/MXM Macro path completes without Queue or Program fault");
+		check(!program_fault,
+			"Current MEM/MXM Macro path completes without Program fault");
 
 		pulse_program_reset();
 		write_command(0, PROGRAM_LOADER_LOAD_IMEM, 64'h3000, 32,

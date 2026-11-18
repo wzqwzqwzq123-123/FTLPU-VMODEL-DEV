@@ -7,22 +7,24 @@ rtl/core/lpu_schedule_clock.sv
 -f sim/filelist_rtl_core.f
 
 rtl/icu/lpu_qctl_shared_pool.sv
-rtl/icu/lpu_qctl_queue_controller.sv
-rtl/icu/lpu_qctl_fabric.sv
+rtl/icu/lpu_qctl_queue_cache.sv
+rtl/icu/lpu_qctl_controller.sv
+rtl/icu/lpu_qctl_sync_fabric.sv
+rtl/icu/lpu_qctl_event_buffer.sv
+rtl/icu/lpu_qctl_system.sv
 
-rtl/program_load/lpu_program_command_sequencer.sv
-rtl/program_load/lpu_program_config_fifo.sv
-rtl/program_load/lpu_instruction_dma.sv
-rtl/program_load/lpu_program_reassembler.sv
-rtl/program_load/lpu_program_word_fifo.sv
-rtl/program_load/lpu_program_transfer_path.sv
-rtl/program_load/lpu_program_load_elastic_stage.sv
-rtl/program_load/lpu_program_load_distributor.sv
-rtl/program_load/lpu_program_distribution_ingress.sv
-rtl/program_load/lpu_program_load_relay.sv
-rtl/program_load/lpu_program_load_relay_chain.sv
-rtl/program_load/lpu_program_distribution_network.sv
 rtl/program_load/lpu_program_load_controller.sv
+rtl/program_load/lpu_program_load_config_fifo.sv
+rtl/program_load/lpu_instruction_dma.sv
+rtl/program_load/lpu_program_load_reassembler.sv
+rtl/program_load/lpu_program_load_word_fifo.sv
+rtl/program_load/lpu_program_load_path.sv
+rtl/program_load/lpu_program_distribute_elastic_stage.sv
+rtl/program_load/lpu_program_distributor.sv
+rtl/program_load/lpu_program_distribute_relay.sv
+rtl/program_load/lpu_program_distribute_relay_chain.sv
+rtl/program_load/lpu_program_distribute_system.sv
+rtl/program_load/lpu_program_load_system.sv
 
 rtl/mem/lpu_mem_local_imem.sv
 rtl/mem/lpu_mem_imem_fetch.sv
@@ -30,7 +32,6 @@ rtl/mem/lpu_mem_macro_decoder.sv
 rtl/mem/lpu_mem_macro_scheduler.sv
 rtl/mem/lpu_mem_macro_frontend.sv
 rtl/mem/lpu_mem_local_imem_frontend.sv
-rtl/mem/lpu_mem_bank_queue.sv
 
 rtl/srf/ftlpu_sr_superlane_col_dir.sv
 rtl/srf/ftlpu_sr_column_dir.sv

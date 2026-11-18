@@ -24,7 +24,7 @@ module lpu_fu_subsystem_cluster #(
 		lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] mem_program_control_i,
 	input logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*
 		lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0] mem_program_destination_i,
-	input logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*17-1:0] mem_program_address_i,
+	input logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*17-1:0] mem_program_imem_address_i,
 	input logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*128-1:0] mem_program_data_i,
 	input logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*4-1:0] mem_program_strb_i,
 	input logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_last_i,
@@ -75,13 +75,10 @@ module lpu_fu_subsystem_cluster #(
 	output logic qctl_load_ready_o,
 	input logic [8:0] qctl_load_address_i,
 	input logic [95:0] qctl_load_data_i,
-	input logic [QCTL_QUEUE_COUNT-1:0] qctl_event_valid_i,
-	output logic [QCTL_QUEUE_COUNT-1:0] qctl_event_ready_o,
-	input logic [QCTL_QUEUE_COUNT*32-1:0] qctl_event_tag_i,
-	input logic [QCTL_QUEUE_COUNT-1:0] qctl_sync_valid_i,
-	output logic [QCTL_QUEUE_COUNT-1:0] qctl_sync_ready_o,
-	output logic [QCTL_QUEUE_COUNT-1:0] qctl_notify_valid_o,
-	input logic [QCTL_QUEUE_COUNT-1:0] qctl_notify_ready_i,
+	input logic [QCTL_QUEUE_COUNT-1:0] qctl_sync_participant_mask_i,
+	input logic qctl_event_valid_i,
+	output logic qctl_event_ready_o,
+	input logic [31:0] qctl_event_tag_i,
 	output logic [QCTL_QUEUE_COUNT-1:0] qctl_mem_packet_valid_o,
 	output logic [QCTL_QUEUE_COUNT*32-1:0] qctl_mem_packet_ordinal_o,
 	input logic [QCTL_QUEUE_COUNT-1:0] qctl_mem_packet_retired_i,
@@ -147,8 +144,8 @@ module lpu_fu_subsystem_cluster #(
 	logic [2*4*32-1:0] vxm_to_mem_east_valid;
 	logic [2*4*32*64-1:0] vxm_to_mem_east_data;
 	logic vxm_stream_conflict;
-	logic [QCTL_QUEUE_COUNT-1:0] qctl_scheduler_enable;
-	logic [QCTL_QUEUE_COUNT*32-1:0] qctl_queue_cycle;
+	logic [QCTL_QUEUE_COUNT-1:0] qctl_scheduler_counter_ce;
+	logic [QCTL_QUEUE_COUNT*32-1:0] qctl_scheduler_cycle;
 	logic qctl_all_primed;
 	logic qctl_all_done;
 
@@ -168,12 +165,12 @@ module lpu_fu_subsystem_cluster #(
 	// Queue-local Scheduler clock. Inactive lanes bypass QCTL in the FU subsystem.
 	generate
 		if(ENABLE_QCTL)begin : gen_qctl
-			lpu_qctl_fabric #(
+			lpu_qctl_system #(
 				.POOL_DEPTH(QCTL_POOL_DEPTH),
 				.QUEUE_COUNT(QCTL_QUEUE_COUNT),
 				.QUEUE_ENTRY_LIMIT(QCTL_QUEUE_ENTRY_LIMIT),
 				.CACHE_DEPTH(QCTL_CACHE_DEPTH)
-			) u_qctl_fabric (
+			) u_qctl_system (
 				.clk_i,
 				.rst_ni,
 				.clear_i(program_reset_i),
@@ -189,23 +186,23 @@ module lpu_fu_subsystem_cluster #(
 				.load_ready_o(qctl_load_ready_o),
 				.load_address_i(qctl_load_address_i),
 				.load_data_i(qctl_load_data_i),
+				.sync_participant_mask_i(qctl_sync_participant_mask_i),
 				.event_valid_i(qctl_event_valid_i),
 				.event_ready_o(qctl_event_ready_o),
 				.event_tag_i(qctl_event_tag_i),
-				.sync_valid_i(qctl_sync_valid_i),
-				.sync_ready_o(qctl_sync_ready_o),
-				.notify_valid_o(qctl_notify_valid_o),
-				.notify_ready_i(qctl_notify_ready_i),
+				.scheduler_cycle_i(qctl_scheduler_cycle),
+				.scheduler_counter_ce_o(qctl_scheduler_counter_ce),
 				.mem_packet_valid_o(qctl_mem_packet_valid_o),
 				.mem_packet_ordinal_o(qctl_mem_packet_ordinal_o),
 				.mem_packet_retired_i(qctl_mem_packet_retired_i),
 				.queue_active_o(qctl_queue_active_o),
-				.scheduler_enable_o(qctl_scheduler_enable),
-				.queue_cycle_o(qctl_queue_cycle),
 				.wait_event_blocked_o(qctl_wait_event_blocked_o),
 				.wait_event_tag_o(qctl_wait_event_tag_o),
 				.primed_o(qctl_primed_o),
 				.done_o(qctl_done_o),
+				.sync_arrive_o(),
+				.notify_pending_o(),
+				.sync_release_o(),
 				.all_primed_o(qctl_all_primed),
 				.all_done_o(qctl_all_done),
 				.fault_o(qctl_fault_o),
@@ -215,14 +212,11 @@ module lpu_fu_subsystem_cluster #(
 		else begin : gen_no_qctl
 			assign qctl_partition_ready_o = 1'b0;
 			assign qctl_load_ready_o = 1'b0;
-			assign qctl_event_ready_o = '0;
-			assign qctl_sync_ready_o = '0;
-			assign qctl_notify_valid_o = '0;
+			assign qctl_event_ready_o = 1'b0;
 			assign qctl_mem_packet_valid_o = '0;
 			assign qctl_mem_packet_ordinal_o = '0;
 			assign qctl_queue_active_o = '0;
-			assign qctl_scheduler_enable = '0;
-			assign qctl_queue_cycle = '0;
+			assign qctl_scheduler_counter_ce = '0;
 			assign qctl_wait_event_blocked_o = '0;
 			assign qctl_wait_event_tag_o = '0;
 			assign qctl_primed_o = '1;
@@ -296,9 +290,9 @@ module lpu_fu_subsystem_cluster #(
 				.run_i(execution_run), .schedule_cycle_i(schedule_cycle_q),
 				.qctl_active_i(qctl_queue_active_o[
 					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
-				.qctl_scheduler_enable_i(qctl_scheduler_enable[
+				.qctl_scheduler_counter_ce_i(qctl_scheduler_counter_ce[
 					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
-				.qctl_schedule_cycle_i(qctl_queue_cycle[
+				.qctl_scheduler_cycle_o(qctl_scheduler_cycle[
 					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE*32+:
 					lpu_pkg::MEM_BANKS_PER_HEMISPHERE*32]),
 				.program_valid_i(mem_program_valid_i[
@@ -311,7 +305,7 @@ module lpu_fu_subsystem_cluster #(
 				.program_destination_i(mem_program_destination_i[
 					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT*PROGRAM_DESTINATION_WIDTH+:
 					PROGRAM_RELAY_COUNT*PROGRAM_DESTINATION_WIDTH]),
-				.program_address_i(mem_program_address_i[
+				.program_imem_address_i(mem_program_imem_address_i[
 					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT*17+:PROGRAM_RELAY_COUNT*17]),
 				.program_data_i(mem_program_data_i[
 					HEMISPHERE_INDEX*PROGRAM_RELAY_COUNT*128+:PROGRAM_RELAY_COUNT*128]),
@@ -385,14 +379,14 @@ module lpu_fu_subsystem_cluster #(
 						qctl_queue_active_o[QCTL_MXM_COMPUTE_BASE+MXM_INDEX],
 						qctl_queue_active_o[QCTL_MXM_DEQUANT_BASE+MXM_INDEX],
 						qctl_queue_active_o[QCTL_MXM_LOAD_BASE+MXM_INDEX]}),
-					.qctl_scheduler_enable_i({
-						qctl_scheduler_enable[QCTL_MXM_COMPUTE_BASE+MXM_INDEX],
-						qctl_scheduler_enable[QCTL_MXM_DEQUANT_BASE+MXM_INDEX],
-						qctl_scheduler_enable[QCTL_MXM_LOAD_BASE+MXM_INDEX]}),
-					.qctl_schedule_cycle_i({
-						qctl_queue_cycle[(QCTL_MXM_COMPUTE_BASE+MXM_INDEX)*32+:32],
-						qctl_queue_cycle[(QCTL_MXM_DEQUANT_BASE+MXM_INDEX)*32+:32],
-						qctl_queue_cycle[(QCTL_MXM_LOAD_BASE+MXM_INDEX)*32+:32]}),
+					.qctl_scheduler_counter_ce_i({
+						qctl_scheduler_counter_ce[QCTL_MXM_COMPUTE_BASE+MXM_INDEX],
+						qctl_scheduler_counter_ce[QCTL_MXM_DEQUANT_BASE+MXM_INDEX],
+						qctl_scheduler_counter_ce[QCTL_MXM_LOAD_BASE+MXM_INDEX]}),
+					.qctl_scheduler_cycle_o({
+						qctl_scheduler_cycle[(QCTL_MXM_COMPUTE_BASE+MXM_INDEX)*32+:32],
+						qctl_scheduler_cycle[(QCTL_MXM_DEQUANT_BASE+MXM_INDEX)*32+:32],
+						qctl_scheduler_cycle[(QCTL_MXM_LOAD_BASE+MXM_INDEX)*32+:32]}),
 					.program_valid_i(mxm_program_valid_i[MXM_INDEX]),
 					.program_ready_o(mxm_program_ready_o[MXM_INDEX]),
 					.program_control_i(outer_program_control_i[

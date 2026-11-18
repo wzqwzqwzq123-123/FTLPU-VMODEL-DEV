@@ -65,8 +65,8 @@ should_run program_relay_chain && run_test lpu_program_load_relay_chain_tb progr
 should_run program_load_control && run_test lpu_program_load_control_tb program_load_control
 should_run mem_sram_execution && run_test lpu_mem_sram_execution_tb mem_sram_execution
 should_run qctl_shared_pool && run_test lpu_qctl_shared_pool_tb qctl_shared_pool
-should_run qctl_queue_controller && run_test lpu_qctl_queue_controller_tb qctl_queue_controller
-should_run qctl_fabric && run_test lpu_qctl_fabric_tb qctl_fabric
+should_run qctl_controller && run_test lpu_qctl_controller_tb qctl_controller
+should_run qctl_system && run_test lpu_qctl_system_tb qctl_system
 should_run macro_frontend_cluster && run_test lpu_top_macro_frontend_cluster_tb macro_frontend_cluster
 should_run top_fu_subsystem_program && run_test lpu_top_fu_subsystem_program_tb top_fu_subsystem_program
 

@@ -14,8 +14,8 @@ module lpu_mxm_subsystem #(
 	input logic run_i,
 	input logic [31:0] schedule_cycle_i,
 	input logic [2:0] qctl_active_i,
-	input logic [2:0] qctl_scheduler_enable_i,
-	input logic [3*32-1:0] qctl_schedule_cycle_i,
+	input logic [2:0] qctl_scheduler_counter_ce_i,
+	output logic [3*32-1:0] qctl_scheduler_cycle_o,
 
 	input logic program_valid_i,
 	output logic program_ready_o,
@@ -64,7 +64,7 @@ module lpu_mxm_subsystem #(
 
 	logic write_fire_w;
 	logic prime_fire_w;
-	logic destination_valid_w;
+	logic destination_legal_w;
 	logic [2:0] program_target_kind_w;
 	logic [7:0] program_target_index_w;
 	logic load_load_ready;
@@ -117,7 +117,7 @@ module lpu_mxm_subsystem #(
 	logic [$clog2(FU_QUEUE_DEPTH+1)-1:0] compute_queue_level;
 	logic coordinator_fault;
 	logic [2:0] coordinator_fault_code;
-	logic compute_width_invalid_w;
+	logic compute_width_violation_w;
 	logic execution_load_valid;
 	logic [47:0] execution_load_instruction;
 	logic execution_dequant_valid;
@@ -127,30 +127,56 @@ module lpu_mxm_subsystem #(
 	logic frontend_rst_ni;
 	logic [2:0] frontend_run;
 	logic [3*32-1:0] frontend_schedule_cycle;
+	logic [2:0] qctl_active_d_q;
+	logic [3*32-1:0] qctl_scheduler_cycle_q;
 
 	assign program_target_kind_w = program_destination_i[
 		PROGRAM_DESTINATION_KIND_MSB:PROGRAM_DESTINATION_KIND_LSB];
 	assign program_target_index_w = program_destination_i[
 		PROGRAM_DESTINATION_INDEX_MSB:PROGRAM_DESTINATION_INDEX_LSB];
-	assign destination_valid_w =
+	assign destination_legal_w =
 		(program_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] == HEMISPHERE_INDEX) &&
 		(program_target_index_w == LOCAL_MXM_INDEX) &&
 		(program_target_kind_w >= PROGRAM_TARGET_MXM_LOAD) &&
 		(program_target_kind_w <= PROGRAM_TARGET_MXM_COMPUTE);
 	assign write_fire_w = program_valid_i && program_ready_o &&
-		(program_control_i == PROGRAM_LOAD_WRITE) && destination_valid_w &&
+		(program_control_i == PROGRAM_LOAD_WRITE) && destination_legal_w &&
 		(program_strb_i == 4'b1111) && (program_address_i < IMEM_DEPTH);
 	assign prime_fire_w = program_valid_i && program_ready_o &&
-		(program_control_i == PROGRAM_LOAD_PRIME) && destination_valid_w;
+		(program_control_i == PROGRAM_LOAD_PRIME) && destination_legal_w;
 	assign frontend_rst_ni = rst_ni && !program_reset_i;
 	// Stream order is Load, Dequant, Compute. Each stream may independently
 	// freeze its Queue-local time at a QCTL boundary.
 	generate
 		for(genvar stream_index = 0; stream_index < 3; stream_index++)begin : gen_qctl_stream_select
 			assign frontend_run[stream_index] = local_frontend_enable_i &&
-				(qctl_active_i[stream_index] ? qctl_scheduler_enable_i[stream_index] : run_i);
+				(qctl_active_i[stream_index] ? qctl_scheduler_counter_ce_i[stream_index] : run_i);
 			assign frontend_schedule_cycle[stream_index*32+:32] = qctl_active_i[stream_index] ?
-				qctl_schedule_cycle_i[stream_index*32+:32] : schedule_cycle_i;
+				qctl_scheduler_cycle_q[stream_index*32+:32] : schedule_cycle_i;
+			assign qctl_scheduler_cycle_o[stream_index*32+:32] =
+				qctl_scheduler_cycle_q[stream_index*32+:32];
+
+			// Each MXM stream Scheduler owns an independent local cycle counter.
+			always_ff @(posedge clk_i or negedge rst_ni) begin
+				if(!rst_ni)begin
+					qctl_active_d_q[stream_index] <= 1'b0;
+					qctl_scheduler_cycle_q[stream_index*32+:32] <= '0;
+				end
+				else if(program_reset_i)begin
+					qctl_active_d_q[stream_index] <= 1'b0;
+					qctl_scheduler_cycle_q[stream_index*32+:32] <= '0;
+				end
+				else begin
+					qctl_active_d_q[stream_index] <= qctl_active_i[stream_index];
+					if(!qctl_active_i[stream_index] || !qctl_active_d_q[stream_index])begin
+						qctl_scheduler_cycle_q[stream_index*32+:32] <= '0;
+					end
+					else if(qctl_scheduler_counter_ce_i[stream_index])begin
+						qctl_scheduler_cycle_q[stream_index*32+:32] <=
+							qctl_scheduler_cycle_q[stream_index*32+:32] + 1'b1;
+					end
+				end
+			end
 		end
 	endgenerate
 	assign frontends_ready_o = load_ready && dequant_ready && compute_ready;
@@ -175,11 +201,11 @@ module lpu_mxm_subsystem #(
 				compute_prime_ready : compute_load_ready;
 			default: program_ready_o = 1'b1;
 		endcase
-		if(!destination_valid_w)begin
+		if(!destination_legal_w)begin
 			program_ready_o = 1'b1;
 		end
 		program_error_o = program_valid_i && program_ready_o &&
-			(!destination_valid_w ||
+			(!destination_legal_w ||
 			 ((program_control_i == PROGRAM_LOAD_WRITE) &&
 			  ((program_strb_i != 4'b1111) || (program_address_i >= IMEM_DEPTH))));
 	end
@@ -266,7 +292,7 @@ module lpu_mxm_subsystem #(
 		.level_o(compute_queue_level), .fault_o(compute_queue_fault)
 	);
 
-	assign compute_width_invalid_w = local_compute_issue_valid_o && local_compute_issue_instruction_o[48];
+	assign compute_width_violation_w = local_compute_issue_valid_o && local_compute_issue_instruction_o[48];
 
 	lpu_mxm_local_coordinator u_coordinator (
 		.clk_i, .rst_ni, .run_i(run_i && local_frontend_enable_i),
@@ -284,7 +310,7 @@ module lpu_mxm_subsystem #(
 		.load_issue_instruction_o(local_load_issue_instruction_o), .load_issue_cycle_o(local_load_issue_cycle_o),
 		.dequant_issue_valid_o(local_dequant_issue_valid_o), .dequant_issue_ready_i(1'b1),
 		.dequant_issue_instruction_o(local_dequant_issue_instruction_o), .dequant_issue_cycle_o(local_dequant_issue_cycle_o),
-		.compute_issue_valid_o(local_compute_issue_valid_o), .compute_issue_ready_i(!compute_width_invalid_w),
+		.compute_issue_valid_o(local_compute_issue_valid_o), .compute_issue_ready_i(!compute_width_violation_w),
 		.compute_issue_instruction_o(local_compute_issue_instruction_o), .compute_issue_cycle_o(local_compute_issue_cycle_o),
 		.fault_o(coordinator_fault), .fault_code_o(coordinator_fault_code)
 	);
@@ -297,7 +323,7 @@ module lpu_mxm_subsystem #(
 	assign execution_dequant_instruction = local_frontend_enable_i ?
 		local_dequant_issue_instruction_o : external_dequant_instruction_i;
 	assign execution_compute_valid = local_frontend_enable_i ?
-		(local_compute_issue_valid_o && !compute_width_invalid_w) : external_compute_valid_i;
+		(local_compute_issue_valid_o && !compute_width_violation_w) : external_compute_valid_i;
 	assign execution_compute_instruction = local_frontend_enable_i ?
 		local_compute_issue_instruction_o[47:0] : external_compute_instruction_i;
 

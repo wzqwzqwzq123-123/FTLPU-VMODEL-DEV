@@ -24,7 +24,8 @@ module lpu_top #(
 	input logic [2:0] program_cmd_write_opcode_i,
 	input logic [63:0] program_cmd_write_source_address_i,
 	input logic [31:0] program_cmd_write_byte_count_i,
-	input logic [11:0] program_cmd_write_destination_i,
+	input logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		program_cmd_write_destination_i,
 	input logic [1:0] program_cmd_write_format_i,
 	input logic [1:0] program_cmd_write_encoding_mode_i,
 	input logic [16:0] program_cmd_write_imem_base_address_i,
@@ -70,13 +71,10 @@ module lpu_top #(
 	output logic qctl_load_ready_o,
 	input logic [8:0] qctl_load_address_i,
 	input logic [95:0] qctl_load_data_i,
-	input logic [QCTL_QUEUE_COUNT-1:0] qctl_event_valid_i,
-	output logic [QCTL_QUEUE_COUNT-1:0] qctl_event_ready_o,
-	input logic [QCTL_QUEUE_COUNT*32-1:0] qctl_event_tag_i,
-	input logic [QCTL_QUEUE_COUNT-1:0] qctl_sync_valid_i,
-	output logic [QCTL_QUEUE_COUNT-1:0] qctl_sync_ready_o,
-	output logic [QCTL_QUEUE_COUNT-1:0] qctl_notify_valid_o,
-	input logic [QCTL_QUEUE_COUNT-1:0] qctl_notify_ready_i,
+	input logic [QCTL_QUEUE_COUNT-1:0] qctl_sync_participant_mask_i,
+	input logic qctl_event_valid_i,
+	output logic qctl_event_ready_o,
+	input logic [31:0] qctl_event_tag_i,
 	output logic [QCTL_QUEUE_COUNT-1:0] qctl_mem_packet_valid_o,
 	output logic [QCTL_QUEUE_COUNT*32-1:0] qctl_mem_packet_ordinal_o,
 	input logic [QCTL_QUEUE_COUNT-1:0] qctl_mem_packet_retired_i,
@@ -126,7 +124,7 @@ module lpu_top #(
 	logic [127:0] load_distribute_data;
 	logic [3:0] load_distribute_strb;
 	logic [1:0] load_distribute_scope;
-	logic [11:0] load_distribute_destination;
+	logic [PROGRAM_DESTINATION_WIDTH-1:0] load_distribute_destination;
 	logic [16:0] load_distribute_imem_address;
 	logic load_distribute_last;
 	logic load_distribute_idle;
@@ -136,7 +134,7 @@ module lpu_top #(
 	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_ready;
 	logic [PROGRAM_RELAY_PORT_COUNT*PROGRAM_LOAD_CONTROL_WIDTH-1:0] mem_program_control;
 	logic [PROGRAM_RELAY_PORT_COUNT*PROGRAM_DESTINATION_WIDTH-1:0] mem_program_destination;
-	logic [PROGRAM_RELAY_PORT_COUNT*17-1:0] mem_program_address;
+	logic [PROGRAM_RELAY_PORT_COUNT*17-1:0] mem_program_imem_address;
 	logic [PROGRAM_RELAY_PORT_COUNT*128-1:0] mem_program_data;
 	logic [PROGRAM_RELAY_PORT_COUNT*4-1:0] mem_program_strb;
 	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_last;
@@ -230,7 +228,7 @@ module lpu_top #(
 		.mem_program_ready_i(mem_program_ready),
 		.mem_program_control_o(mem_program_control),
 		.mem_program_destination_o(mem_program_destination),
-		.mem_program_address_o(mem_program_address),
+		.mem_program_imem_address_o(mem_program_imem_address),
 		.mem_program_data_o(mem_program_data),
 		.mem_program_strb_o(mem_program_strb),
 		.mem_program_last_o(mem_program_last),
@@ -274,7 +272,7 @@ module lpu_top #(
 		.mem_program_valid_i(mem_program_valid), .mem_program_ready_o(mem_program_ready),
 		.mem_program_control_i(mem_program_control),
 		.mem_program_destination_i(mem_program_destination),
-		.mem_program_address_i(mem_program_address), .mem_program_data_i(mem_program_data),
+		.mem_program_imem_address_i(mem_program_imem_address), .mem_program_data_i(mem_program_data),
 		.mem_program_strb_i(mem_program_strb), .mem_program_last_i(mem_program_last),
 		.mem_program_error_o(mem_program_error),
 		.mxm_program_valid_i(mxm_program_valid), .mxm_program_ready_o(mxm_program_ready),
@@ -297,8 +295,8 @@ module lpu_top #(
 		.qctl_load_mode_i, .qctl_partition_valid_i, .qctl_partition_ready_o, .qctl_partition_queue_i,
 		.qctl_partition_base_i, .qctl_partition_count_i, .qctl_partition_generation_i,
 		.qctl_load_valid_i, .qctl_load_ready_o, .qctl_load_address_i, .qctl_load_data_i,
-		.qctl_event_valid_i, .qctl_event_ready_o, .qctl_event_tag_i, .qctl_sync_valid_i, .qctl_sync_ready_o,
-		.qctl_notify_valid_o, .qctl_notify_ready_i, .qctl_mem_packet_valid_o, .qctl_mem_packet_ordinal_o,
+		.qctl_sync_participant_mask_i, .qctl_event_valid_i, .qctl_event_ready_o, .qctl_event_tag_i,
+		.qctl_mem_packet_valid_o, .qctl_mem_packet_ordinal_o,
 		.qctl_mem_packet_retired_i, .qctl_queue_active_o, .qctl_wait_event_blocked_o, .qctl_wait_event_tag_o,
 		.qctl_primed_o, .qctl_done_o, .qctl_fault_o, .qctl_fault_code_o,
 		.local_mem_issue_valid_o(local_mem_issue_valid), .local_mem_issue_instruction_o(local_mem_issue_instruction),

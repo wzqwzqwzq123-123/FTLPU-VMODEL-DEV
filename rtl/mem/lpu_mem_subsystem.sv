@@ -2,7 +2,6 @@ module lpu_mem_subsystem #(
 	parameter integer HEMISPHERE_INDEX = lpu_program_load_pkg::PROGRAM_HEMISPHERE_EAST,
 	parameter integer IMEM_DEPTH = 131072,
 	parameter integer ACTIVE_CONTEXTS = 4,
-	parameter integer FU_QUEUE_DEPTH = 16,
 	parameter integer PROGRAM_PORT_COUNT = lpu_program_load_pkg::PROGRAM_RELAY_COUNT,
 	parameter integer PROGRAM_BANKS_PER_PORT = lpu_program_load_pkg::PROGRAM_RELAY_BANKS_PER_STAGE,
 	parameter integer DEPTH_ROWS = lpu_pkg::SRAM_DEPTH_ROWS,
@@ -17,8 +16,8 @@ module lpu_mem_subsystem #(
 	input logic run_i,
 	input logic [31:0] schedule_cycle_i,
 	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_active_i,
-	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_scheduler_enable_i,
-	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE*32-1:0] qctl_schedule_cycle_i,
+	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_scheduler_counter_ce_i,
+	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE*32-1:0] qctl_scheduler_cycle_o,
 
 	input logic [PROGRAM_PORT_COUNT-1:0] program_valid_i,
 	output logic [PROGRAM_PORT_COUNT-1:0] program_ready_o,
@@ -26,7 +25,7 @@ module lpu_mem_subsystem #(
 		program_control_i,
 	input logic [PROGRAM_PORT_COUNT*lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
 		program_destination_i,
-	input logic [PROGRAM_PORT_COUNT*17-1:0] program_address_i,
+	input logic [PROGRAM_PORT_COUNT*17-1:0] program_imem_address_i,
 	input logic [PROGRAM_PORT_COUNT*128-1:0] program_data_i,
 	input logic [PROGRAM_PORT_COUNT*4-1:0] program_strb_i,
 	input logic [PROGRAM_PORT_COUNT-1:0] program_last_i,
@@ -141,14 +140,14 @@ module lpu_mem_subsystem #(
 				 ((program_control_i[program_port_gen*PROGRAM_LOAD_CONTROL_WIDTH+:
 				   PROGRAM_LOAD_CONTROL_WIDTH] == PROGRAM_LOAD_WRITE) &&
 				  ((program_strb_i[program_port_gen*4+:4] != 4'b0111) ||
-				   (program_address_i[program_port_gen*17+:17] >= IMEM_DEPTH))));
+				   (program_imem_address_i[program_port_gen*17+:17] >= IMEM_DEPTH))));
 			assign write_fire_w[program_port_gen] = program_valid_i[program_port_gen] &&
 				program_ready_o[program_port_gen] &&
 				(program_control_i[program_port_gen*PROGRAM_LOAD_CONTROL_WIDTH+:
 				 PROGRAM_LOAD_CONTROL_WIDTH] == PROGRAM_LOAD_WRITE) &&
 				destination_legal_w[program_port_gen] &&
 				(program_strb_i[program_port_gen*4+:4] == 4'b0111) &&
-				(program_address_i[program_port_gen*17+:17] < IMEM_DEPTH);
+				(program_imem_address_i[program_port_gen*17+:17] < IMEM_DEPTH);
 			assign prime_fire_w[program_port_gen] = program_valid_i[program_port_gen] &&
 				program_ready_o[program_port_gen] &&
 				(program_control_i[program_port_gen*PROGRAM_LOAD_CONTROL_WIDTH+:
@@ -158,31 +157,55 @@ module lpu_mem_subsystem #(
 	endgenerate
 
 	// Instantiate one complete Instruction Frontend per MEM Bank. Each Frontend
-	// owns its Local iMEM, Macro pipeline, and final Instruction Queue.
+	// owns its Local iMEM and Macro pipeline; its Scheduler drives MEM directly.
 	generate
 		for(genvar queue_gen = 0; queue_gen < QUEUE_COUNT; queue_gen++)begin : gen_bank_frontend
 			localparam integer PROGRAM_PORT_INDEX = queue_gen / PROGRAM_BANKS_PER_PORT;
 			logic frontend_run;
 			logic [31:0] frontend_schedule_cycle;
+			logic qctl_active_d_q;
+			logic [31:0] qctl_scheduler_cycle_q;
 
 			// QCTL controls only the selected Bank. The adjacent Bank retains its
 			// own local time and can continue independently.
 			assign frontend_run = local_frontend_enable_i &&
-				(qctl_active_i[queue_gen] ? qctl_scheduler_enable_i[queue_gen] : run_i);
+				(qctl_active_i[queue_gen] ? qctl_scheduler_counter_ce_i[queue_gen] : run_i);
 			assign frontend_schedule_cycle = qctl_active_i[queue_gen] ?
-				qctl_schedule_cycle_i[queue_gen*32+:32] : schedule_cycle_i;
+				qctl_scheduler_cycle_q : schedule_cycle_i;
+			assign qctl_scheduler_cycle_o[queue_gen*32+:32] = qctl_scheduler_cycle_q;
+
+			// The Bank Scheduler owns its local cycle. QCTL supplies only the
+			// counter-enable decision for the current physical edge.
+			always_ff @(posedge clk_i or negedge rst_ni) begin
+				if(!rst_ni)begin
+					qctl_active_d_q <= 1'b0;
+					qctl_scheduler_cycle_q <= '0;
+				end
+				else if(program_reset_i)begin
+					qctl_active_d_q <= 1'b0;
+					qctl_scheduler_cycle_q <= '0;
+				end
+				else begin
+					qctl_active_d_q <= qctl_active_i[queue_gen];
+					if(!qctl_active_i[queue_gen] || !qctl_active_d_q)begin
+						qctl_scheduler_cycle_q <= '0;
+					end
+					else if(qctl_scheduler_counter_ce_i[queue_gen])begin
+						qctl_scheduler_cycle_q <= qctl_scheduler_cycle_q + 1'b1;
+					end
+				end
+			end
 
 			lpu_mem_local_imem_frontend #(
 				.IMEM_DEPTH(IMEM_DEPTH),
-				.ACTIVE_CONTEXTS(ACTIVE_CONTEXTS),
-				.INSTRUCTION_QUEUE_DEPTH(FU_QUEUE_DEPTH)
+				.ACTIVE_CONTEXTS(ACTIVE_CONTEXTS)
 			) u_frontend (
 				.clk_i, .rst_ni, .program_reset_i, .clear_i(1'b0),
 				.load_valid_i(write_fire_w[PROGRAM_PORT_INDEX] &&
 					(program_queue_id_w[PROGRAM_PORT_INDEX*PROGRAM_TARGET_INDEX_WIDTH+:
 					 PROGRAM_TARGET_INDEX_WIDTH] == queue_gen)),
 				.load_ready_o(load_ready[queue_gen]),
-				.load_address_i(program_address_i[PROGRAM_PORT_INDEX*17+:17]),
+				.load_imem_address_i(program_imem_address_i[PROGRAM_PORT_INDEX*17+:17]),
 				.load_data_i(program_data_i[PROGRAM_PORT_INDEX*128+:128]),
 				.load_strb_i(program_strb_i[PROGRAM_PORT_INDEX*4+:4]),
 				.load_last_i(program_last_i[PROGRAM_PORT_INDEX]),
@@ -191,11 +214,11 @@ module lpu_mem_subsystem #(
 					 PROGRAM_TARGET_INDEX_WIDTH] == queue_gen)),
 				.prime_ready_o(prime_ready[queue_gen]), .run_i(frontend_run),
 				.schedule_cycle_i(frontend_schedule_cycle),
-				.issue_valid_o(local_issue_valid_o[queue_gen]),
-				.issue_ready_i(execution_issue_ready[queue_gen]),
-				.issue_instruction_o(local_issue_instruction_o[
+				.mem_issue_valid_o(local_issue_valid_o[queue_gen]),
+				.mem_issue_ready_i(execution_issue_ready[queue_gen]),
+				.mem_issue_instruction_o(local_issue_instruction_o[
 					queue_gen*lpu_pkg::MEM_INSTRUCTION_WIDTH+:lpu_pkg::MEM_INSTRUCTION_WIDTH]),
-				.issue_cycle_o(local_issue_cycle_o[queue_gen*32+:32]),
+				.mem_issue_cycle_o(local_issue_cycle_o[queue_gen*32+:32]),
 				.configured_o(), .frontend_ready_o(frontend_ready[queue_gen]),
 				.frontend_idle_o(frontend_idle[queue_gen]),
 				.fault_o(frontend_fault[queue_gen]),
