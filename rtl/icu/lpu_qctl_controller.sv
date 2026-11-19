@@ -18,11 +18,11 @@ module lpu_qctl_controller (
 	input logic notify_ready_i,
 	input logic event_valid_i,
 	input logic [lpu_qctl_pkg::QCTL_OPERAND_WIDTH-1:0] event_tag_i,
+	output logic event_wait_o,
+	output logic event_consume_o,
 	output logic mem_packet_valid_o,
 	output logic [lpu_qctl_pkg::QCTL_OPERAND_WIDTH-1:0] mem_packet_ordinal_o,
 	input logic mem_packet_retired_i,
-	output logic wait_event_blocked_o,
-	output logic [lpu_qctl_pkg::QCTL_OPERAND_WIDTH-1:0] wait_event_tag_o,
 	output logic fault_o,
 	output logic [3:0] fault_code_o
 );
@@ -46,7 +46,8 @@ module lpu_qctl_controller (
 	logic [lpu_qctl_pkg::QCTL_CYCLE_WIDTH-1:0] head_cycle_w;
 	logic [lpu_qctl_pkg::QCTL_OPCODE_WIDTH-1:0] head_opcode_w;
 	logic [lpu_qctl_pkg::QCTL_OPERAND_WIDTH-1:0] head_operand_w;
-	logic event_match_w;
+	logic [lpu_qctl_pkg::QCTL_OPERAND_WIDTH-1:0] event_compare_operand_w;
+	logic boundary_hit_w;
 	logic boundary_missed_w;
 	logic invalid_record_w;
 	logic fault_q;
@@ -57,86 +58,84 @@ module lpu_qctl_controller (
 	assign head_cycle_w = lpu_qctl_pkg::qctl_record_cycle(head_record_i);
 	assign head_opcode_w = lpu_qctl_pkg::qctl_record_opcode(head_record_i);
 	assign head_operand_w = lpu_qctl_pkg::qctl_record_operand(head_record_i);
-	assign event_match_w = event_valid_i && (event_tag_i == wait_event_tag_o);
+	assign boundary_hit_w = run_i && configured_i && primed_i && head_valid_i &&
+		(state_q == ST_IDLE) && (head_cycle_w == scheduler_cycle_i);
+	assign boundary_missed_w = run_i && configured_i && primed_i && head_valid_i &&
+		(state_q == ST_IDLE) && (head_cycle_w < scheduler_cycle_i);
+	assign event_compare_operand_w = state_q == ST_EVENT_WAIT ? wait_operand_q : head_operand_w;
+	assign event_consume_o = event_wait_o && event_valid_i &&
+		(event_tag_i == event_compare_operand_w);
 	assign fault_o = fault_q;
 	assign fault_code_o = fault_code_q;
 
-	// The five-state FSM owns only QCTL semantic waits. The Cache keeps the
-	// current record stable until head_retire_o confirms semantic completion.
+	// The semantic FSM holds the Cache head until the matching global condition
+	// completes. A boundary hit is handled before the local counter can advance.
 	always_comb begin
 		state_d = state_q;
 		wait_operand_d = wait_operand_q;
 		head_retire_o = 1'b0;
 		sync_arrive_valid_o = 1'b0;
 		notify_valid_o = 1'b0;
+		event_wait_o = 1'b0;
 		mem_packet_valid_o = 1'b0;
 		mem_packet_ordinal_o = wait_operand_q;
-		wait_event_blocked_o = 1'b0;
-		wait_event_tag_o = wait_operand_q;
-		boundary_missed_w = 1'b0;
 		invalid_record_w = 1'b0;
 
 		case(state_q)
 			ST_IDLE: begin
-				if(run_i && configured_i && primed_i && head_valid_i)begin
-					if(head_cycle_w < scheduler_cycle_i)begin
-						boundary_missed_w = 1'b1;
-					end
-					else if(head_cycle_w == scheduler_cycle_i)begin
-						case(head_opcode_w)
-							lpu_qctl_pkg::QCTL_OPCODE_SYNC: begin
-								if(head_operand_w != 0)begin
-									invalid_record_w = 1'b1;
-								end
-								else begin
-									sync_arrive_valid_o = 1'b1;
-									state_d = ST_SYNC_WAIT;
-								end
+				if(boundary_hit_w)begin
+					case(head_opcode_w)
+						lpu_qctl_pkg::QCTL_OPCODE_SYNC: begin
+							if(head_operand_w != 0)begin
+								invalid_record_w = 1'b1;
 							end
-							lpu_qctl_pkg::QCTL_OPCODE_WAIT_EVENT: begin
-								wait_event_blocked_o = 1'b1;
-								wait_event_tag_o = head_operand_w;
-								if(event_valid_i && (event_tag_i == head_operand_w))begin
+							else begin
+								sync_arrive_valid_o = 1'b1;
+								state_d = ST_SYNC_WAIT;
+							end
+						end
+						lpu_qctl_pkg::QCTL_OPCODE_WAIT_EVENT: begin
+							event_wait_o = 1'b1;
+							wait_operand_d = head_operand_w;
+							if(event_consume_o)begin
+								head_retire_o = 1'b1;
+							end
+							else begin
+								state_d = ST_EVENT_WAIT;
+							end
+						end
+						lpu_qctl_pkg::QCTL_OPCODE_NOTIFY: begin
+							if(head_operand_w != 0)begin
+								invalid_record_w = 1'b1;
+							end
+							else begin
+								notify_valid_o = 1'b1;
+								if(notify_ready_i)begin
 									head_retire_o = 1'b1;
 								end
 								else begin
-									wait_operand_d = head_operand_w;
-									state_d = ST_EVENT_WAIT;
+									state_d = ST_NOTIFY_WAIT;
 								end
 							end
-							lpu_qctl_pkg::QCTL_OPCODE_NOTIFY: begin
-								if(head_operand_w != 0)begin
-									invalid_record_w = 1'b1;
+						end
+						lpu_qctl_pkg::QCTL_OPCODE_MEM_PACKET: begin
+							if(head_operand_w == 0)begin
+								invalid_record_w = 1'b1;
+							end
+							else begin
+								mem_packet_valid_o = 1'b1;
+								mem_packet_ordinal_o = head_operand_w;
+								wait_operand_d = head_operand_w;
+								if(mem_packet_retired_i)begin
+									head_retire_o = 1'b1;
 								end
 								else begin
-									notify_valid_o = 1'b1;
-									if(notify_ready_i)begin
-										head_retire_o = 1'b1;
-									end
-									else begin
-										state_d = ST_NOTIFY_WAIT;
-									end
+									state_d = ST_MEMPACKET_WAIT;
 								end
 							end
-							lpu_qctl_pkg::QCTL_OPCODE_MEM_PACKET: begin
-								if(head_operand_w == 0)begin
-									invalid_record_w = 1'b1;
-								end
-								else begin
-									mem_packet_valid_o = 1'b1;
-									mem_packet_ordinal_o = head_operand_w;
-									if(mem_packet_retired_i)begin
-										head_retire_o = 1'b1;
-									end
-									else begin
-										wait_operand_d = head_operand_w;
-										state_d = ST_MEMPACKET_WAIT;
-									end
-								end
-							end
-							default: invalid_record_w = 1'b1;
-						endcase
-					end
+						end
+						default: invalid_record_w = 1'b1;
+					endcase
 				end
 			end
 			ST_SYNC_WAIT: begin
@@ -147,9 +146,8 @@ module lpu_qctl_controller (
 				end
 			end
 			ST_EVENT_WAIT: begin
-				wait_event_blocked_o = 1'b1;
-				wait_event_tag_o = wait_operand_q;
-				if(event_match_w)begin
+				event_wait_o = 1'b1;
+				if(event_consume_o)begin
 					head_retire_o = 1'b1;
 					state_d = ST_IDLE;
 				end
@@ -176,8 +174,8 @@ module lpu_qctl_controller (
 		endcase
 	end
 
-	// CE is suppressed on the exact control-cycle hit, before the Scheduler can
-	// increment beyond that boundary. Every wait state keeps the same cycle.
+	// The Scheduler counter advances only while the next cached control boundary
+	// is known to be in the future. Empty-but-not-done Cache state is a safe stall.
 	always_comb begin
 		scheduler_counter_ce_o = 1'b0;
 		if(run_i && configured_i && primed_i && !fault_q && (state_q == ST_IDLE))begin
@@ -190,8 +188,8 @@ module lpu_qctl_controller (
 		end
 	end
 
-	// Semantic faults remain sticky because continuing could move a static
-	// control boundary or interpret a malformed record as a legal operation.
+	// QCTL protocol errors are sticky because continuing could cross an absolute
+	// control boundary or reinterpret a malformed control record.
 	always_comb begin
 		set_fault_w = 1'b0;
 		set_fault_code_w = FAULT_NONE;
@@ -209,7 +207,7 @@ module lpu_qctl_controller (
 		end
 	end
 
-	// Wait state and operand are stable until the corresponding completion.
+	// Wait state and operand remain stable until the corresponding completion.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			state_q <= ST_IDLE;
@@ -225,7 +223,7 @@ module lpu_qctl_controller (
 		end
 	end
 
-	// Retain the first Controller fault until the next program configuration.
+	// Retain the first Controller fault until the next Queue configuration.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			fault_q <= 1'b0;

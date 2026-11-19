@@ -4,6 +4,18 @@ package lpu_qctl_pkg;
 	localparam integer QCTL_OPCODE_WIDTH = 4;
 	localparam integer QCTL_OPERAND_WIDTH = 32;
 
+	// Logical message classes used by the unified QCTL Fabric. The first RTL
+	// implementation keeps independent valid/ready channels for each class.
+	typedef enum logic [3:0] {
+		QCTL_MSG_POOL_READ_REQ = 4'd0,
+		QCTL_MSG_POOL_READ_RESP = 4'd1,
+		QCTL_MSG_EVENT = 4'd2,
+		QCTL_MSG_SYNC_ARRIVE = 4'd3,
+		QCTL_MSG_NOTIFY_REQ = 4'd4,
+		QCTL_MSG_SYNC_RELEASE = 4'd5,
+		QCTL_MSG_MEM_PACKET = 4'd6
+	} lpu_qctl_msg_type_e;
+
 	typedef enum logic [QCTL_OPCODE_WIDTH-1:0] {
 		QCTL_OPCODE_SYNC = 4'd3,
 		QCTL_OPCODE_NOTIFY = 4'd4,

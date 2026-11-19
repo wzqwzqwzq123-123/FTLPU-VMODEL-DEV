@@ -5,7 +5,12 @@ module lpu_mxm_subsystem #(
 	parameter integer ACTIVE_CONTEXTS = 4,
 	parameter integer FU_QUEUE_DEPTH = 16,
 	parameter integer ACCUMULATOR_BLOCK_COUNT = lpu_pkg::MXM_ACCUMULATOR_BLOCK_COUNT,
-	parameter bit PAIR_LOAD_DEQUANT = 1'b0
+	parameter bit PAIR_LOAD_DEQUANT = 1'b0,
+	parameter integer QCTL_QUEUE_ENTRY_LIMIT = 16,
+	parameter integer QCTL_CACHE_DEPTH = 4,
+	parameter integer QCTL_GENERATION_WIDTH = 64,
+	parameter integer QCTL_ENTRY_INDEX_WIDTH = QCTL_QUEUE_ENTRY_LIMIT <= 1 ? 1 : $clog2(QCTL_QUEUE_ENTRY_LIMIT),
+	parameter integer QCTL_ENTRY_COUNT_WIDTH = $clog2(QCTL_QUEUE_ENTRY_LIMIT + 1)
 ) (
 	input logic clk_i,
 	input logic rst_ni,
@@ -13,9 +18,32 @@ module lpu_mxm_subsystem #(
 	input logic local_frontend_enable_i,
 	input logic run_i,
 	input logic [31:0] schedule_cycle_i,
-	input logic [2:0] qctl_active_i,
-	input logic [2:0] qctl_scheduler_counter_ce_i,
-	output logic [3*32-1:0] qctl_scheduler_cycle_o,
+	input logic [2:0] qctl_configure_valid_i,
+	input logic [3*QCTL_ENTRY_COUNT_WIDTH-1:0] qctl_configure_count_i,
+	input logic [3*QCTL_GENERATION_WIDTH-1:0] qctl_configure_generation_i,
+	output logic [2:0] qctl_pool_request_valid_o,
+	input logic [2:0] qctl_pool_request_ready_i,
+	output logic [3*QCTL_ENTRY_INDEX_WIDTH-1:0] qctl_pool_request_index_o,
+	output logic [3*QCTL_GENERATION_WIDTH-1:0] qctl_pool_request_generation_o,
+	input logic [2:0] qctl_pool_response_valid_i,
+	input logic [lpu_qctl_pkg::QCTL_RECORD_WIDTH-1:0] qctl_pool_response_data_i,
+	input logic qctl_pool_response_error_i,
+	input logic [2:0] qctl_event_valid_i,
+	input logic [lpu_qctl_pkg::QCTL_OPERAND_WIDTH-1:0] qctl_event_tag_i,
+	output logic [2:0] qctl_event_wait_o,
+	output logic [2:0] qctl_event_consume_o,
+	output logic [2:0] qctl_sync_arrive_valid_o,
+	input logic [2:0] qctl_sync_release_valid_i,
+	output logic [2:0] qctl_notify_valid_o,
+	input logic [2:0] qctl_notify_ready_i,
+	output logic [2:0] qctl_mem_packet_valid_o,
+	output logic [3*lpu_qctl_pkg::QCTL_OPERAND_WIDTH-1:0] qctl_mem_packet_ordinal_o,
+	input logic [2:0] qctl_mem_packet_retired_i,
+	output logic [2:0] qctl_configured_o,
+	output logic [2:0] qctl_primed_o,
+	output logic [2:0] qctl_done_o,
+	output logic [2:0] qctl_fault_o,
+	output logic [3*4-1:0] qctl_fault_code_o,
 
 	input logic program_valid_i,
 	output logic program_ready_o,
@@ -127,7 +155,7 @@ module lpu_mxm_subsystem #(
 	logic frontend_rst_ni;
 	logic [2:0] frontend_run;
 	logic [3*32-1:0] frontend_schedule_cycle;
-	logic [2:0] qctl_active_d_q;
+	logic [2:0] qctl_scheduler_counter_ce;
 	logic [3*32-1:0] qctl_scheduler_cycle_q;
 
 	assign program_target_kind_w = program_destination_i[
@@ -145,33 +173,65 @@ module lpu_mxm_subsystem #(
 	assign prime_fire_w = program_valid_i && program_ready_o &&
 		(program_control_i == PROGRAM_LOAD_PRIME) && destination_legal_w;
 	assign frontend_rst_ni = rst_ni && !program_reset_i;
-	// Stream order is Load, Dequant, Compute. Each stream may independently
-	// freeze its Queue-local time at a QCTL boundary.
+	// Stream order is Load, Dequant, Compute. Each FU-local endpoint owns one
+	// Cache, Controller and Scheduler counter without central endpoint state.
 	generate
 		for(genvar stream_index = 0; stream_index < 3; stream_index++)begin : gen_qctl_stream_select
 			assign frontend_run[stream_index] = local_frontend_enable_i &&
-				(qctl_active_i[stream_index] ? qctl_scheduler_counter_ce_i[stream_index] : run_i);
-			assign frontend_schedule_cycle[stream_index*32+:32] = qctl_active_i[stream_index] ?
+				(qctl_configured_o[stream_index] ? qctl_scheduler_counter_ce[stream_index] : run_i);
+			assign frontend_schedule_cycle[stream_index*32+:32] = qctl_configured_o[stream_index] ?
 				qctl_scheduler_cycle_q[stream_index*32+:32] : schedule_cycle_i;
-			assign qctl_scheduler_cycle_o[stream_index*32+:32] =
-				qctl_scheduler_cycle_q[stream_index*32+:32];
+
+			lpu_qctl_endpoint #(
+				.QUEUE_ENTRY_LIMIT(QCTL_QUEUE_ENTRY_LIMIT),
+				.CACHE_DEPTH(QCTL_CACHE_DEPTH),
+				.GENERATION_WIDTH(QCTL_GENERATION_WIDTH)
+			) u_qctl_endpoint (
+				.clk_i, .rst_ni, .clear_i(program_reset_i), .run_i(run_i),
+				.configure_valid_i(qctl_configure_valid_i[stream_index]),
+				.configure_count_i(qctl_configure_count_i[
+					stream_index*QCTL_ENTRY_COUNT_WIDTH+:QCTL_ENTRY_COUNT_WIDTH]),
+				.configure_generation_i(qctl_configure_generation_i[
+					stream_index*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH]),
+				.pool_request_valid_o(qctl_pool_request_valid_o[stream_index]),
+				.pool_request_ready_i(qctl_pool_request_ready_i[stream_index]),
+				.pool_request_index_o(qctl_pool_request_index_o[
+					stream_index*QCTL_ENTRY_INDEX_WIDTH+:QCTL_ENTRY_INDEX_WIDTH]),
+				.pool_request_generation_o(qctl_pool_request_generation_o[
+					stream_index*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH]),
+				.pool_response_valid_i(qctl_pool_response_valid_i[stream_index]),
+				.pool_response_data_i(qctl_pool_response_data_i),
+				.pool_response_error_i(qctl_pool_response_error_i),
+				.scheduler_cycle_i(qctl_scheduler_cycle_q[stream_index*32+:32]),
+				.scheduler_counter_ce_o(qctl_scheduler_counter_ce[stream_index]),
+				.event_valid_i(qctl_event_valid_i[stream_index]), .event_tag_i(qctl_event_tag_i),
+				.event_wait_o(qctl_event_wait_o[stream_index]),
+				.event_consume_o(qctl_event_consume_o[stream_index]),
+				.sync_arrive_valid_o(qctl_sync_arrive_valid_o[stream_index]),
+				.sync_release_valid_i(qctl_sync_release_valid_i[stream_index]),
+				.notify_valid_o(qctl_notify_valid_o[stream_index]),
+				.notify_ready_i(qctl_notify_ready_i[stream_index]),
+				.mem_packet_valid_o(qctl_mem_packet_valid_o[stream_index]),
+				.mem_packet_ordinal_o(qctl_mem_packet_ordinal_o[
+					stream_index*lpu_qctl_pkg::QCTL_OPERAND_WIDTH+:lpu_qctl_pkg::QCTL_OPERAND_WIDTH]),
+				.mem_packet_retired_i(qctl_mem_packet_retired_i[stream_index]),
+				.configured_o(qctl_configured_o[stream_index]),
+				.primed_o(qctl_primed_o[stream_index]), .done_o(qctl_done_o[stream_index]),
+				.fault_o(qctl_fault_o[stream_index]),
+				.fault_code_o(qctl_fault_code_o[stream_index*4+:4])
+			);
 
 			// Each MXM stream Scheduler owns an independent local cycle counter.
 			always_ff @(posedge clk_i or negedge rst_ni) begin
 				if(!rst_ni)begin
-					qctl_active_d_q[stream_index] <= 1'b0;
 					qctl_scheduler_cycle_q[stream_index*32+:32] <= '0;
 				end
-				else if(program_reset_i)begin
-					qctl_active_d_q[stream_index] <= 1'b0;
+				else if(program_reset_i || qctl_configure_valid_i[stream_index])begin
 					qctl_scheduler_cycle_q[stream_index*32+:32] <= '0;
 				end
 				else begin
-					qctl_active_d_q[stream_index] <= qctl_active_i[stream_index];
-					if(!qctl_active_i[stream_index] || !qctl_active_d_q[stream_index])begin
-						qctl_scheduler_cycle_q[stream_index*32+:32] <= '0;
-					end
-					else if(qctl_scheduler_counter_ce_i[stream_index])begin
+					if(qctl_configured_o[stream_index] &&
+						qctl_scheduler_counter_ce[stream_index])begin
 						qctl_scheduler_cycle_q[stream_index*32+:32] <=
 							qctl_scheduler_cycle_q[stream_index*32+:32] + 1'b1;
 					end

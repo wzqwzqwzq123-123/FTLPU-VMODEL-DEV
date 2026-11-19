@@ -1,4 +1,4 @@
-module lpu_qctl_shared_pool #(
+module lpu_qctl_pool #(
 	parameter integer POOL_DEPTH = 512,
 	// Current LPU32 CModel allocates QCTL partitions for 208 MEM Queues and three streams of four MXMs.
 	parameter integer QUEUE_COUNT = 220,
@@ -29,7 +29,7 @@ module lpu_qctl_shared_pool #(
 	input logic [POOL_ADDRESS_WIDTH-1:0] load_address_i,
 	input logic [lpu_qctl_pkg::QCTL_RECORD_WIDTH-1:0] load_data_i,
 
-	// All local Controllers hold their request until this single-port arbiter grants it.
+	// All FU-local Caches hold their request until this single-port arbiter grants it.
 	input logic [QUEUE_COUNT-1:0] request_valid_i,
 	output logic [QUEUE_COUNT-1:0] request_ready_o,
 	input logic [QUEUE_COUNT*ENTRY_INDEX_WIDTH-1:0] request_index_i,
@@ -133,7 +133,7 @@ module lpu_qctl_shared_pool #(
 		end
 	end
 
-	// Round-robin selection identifies at most one requesting local Controller in each physical cycle.
+	// Round-robin selection identifies at most one requesting FU-local Cache in each physical cycle.
 	always_comb begin
 		selected_request_found_w = 1'b0;
 		selected_request_queue_w = '0;

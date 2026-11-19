@@ -1,6 +1,6 @@
 // QCTL Queue-local prefetch cache. Storage bookkeeping is intentionally
 // isolated from the semantic Controller state machine.
-module lpu_qctl_queue_cache #(
+module lpu_qctl_cache #(
 	parameter integer QUEUE_ENTRY_LIMIT = 16,
 	parameter integer CACHE_DEPTH = 4,
 	parameter integer GENERATION_WIDTH = 64,
@@ -121,7 +121,7 @@ module lpu_qctl_queue_cache #(
 	end
 
 	// Configuration owns partition-local Fetch and Retire offsets. Pool addresses
-	// remain the responsibility of lpu_qctl_shared_pool.
+	// remain the responsibility of lpu_qctl_pool.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			configured_q <= 1'b0;

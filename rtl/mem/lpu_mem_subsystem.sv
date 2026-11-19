@@ -7,7 +7,12 @@ module lpu_mem_subsystem #(
 	parameter integer DEPTH_ROWS = lpu_pkg::SRAM_DEPTH_ROWS,
 	parameter integer ACTIVE_COLUMNS = 52,
 	parameter bit USE_SRAM_MACRO = 1'b0,
-	parameter bit USE_NATIVE_MEM = 1'b1
+	parameter bit USE_NATIVE_MEM = 1'b1,
+	parameter integer QCTL_QUEUE_ENTRY_LIMIT = 16,
+	parameter integer QCTL_CACHE_DEPTH = 4,
+	parameter integer QCTL_GENERATION_WIDTH = 64,
+	parameter integer QCTL_ENTRY_INDEX_WIDTH = QCTL_QUEUE_ENTRY_LIMIT <= 1 ? 1 : $clog2(QCTL_QUEUE_ENTRY_LIMIT),
+	parameter integer QCTL_ENTRY_COUNT_WIDTH = $clog2(QCTL_QUEUE_ENTRY_LIMIT + 1)
 ) (
 	input logic clk_i,
 	input logic rst_ni,
@@ -15,9 +20,32 @@ module lpu_mem_subsystem #(
 	input logic local_frontend_enable_i,
 	input logic run_i,
 	input logic [31:0] schedule_cycle_i,
-	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_active_i,
-	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_scheduler_counter_ce_i,
-	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE*32-1:0] qctl_scheduler_cycle_o,
+	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_configure_valid_i,
+	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE*QCTL_ENTRY_COUNT_WIDTH-1:0] qctl_configure_count_i,
+	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE*QCTL_GENERATION_WIDTH-1:0] qctl_configure_generation_i,
+	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_pool_request_valid_o,
+	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_pool_request_ready_i,
+	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE*QCTL_ENTRY_INDEX_WIDTH-1:0] qctl_pool_request_index_o,
+	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE*QCTL_GENERATION_WIDTH-1:0] qctl_pool_request_generation_o,
+	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_pool_response_valid_i,
+	input logic [lpu_qctl_pkg::QCTL_RECORD_WIDTH-1:0] qctl_pool_response_data_i,
+	input logic qctl_pool_response_error_i,
+	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_event_valid_i,
+	input logic [lpu_qctl_pkg::QCTL_OPERAND_WIDTH-1:0] qctl_event_tag_i,
+	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_event_wait_o,
+	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_event_consume_o,
+	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_sync_arrive_valid_o,
+	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_sync_release_valid_i,
+	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_notify_valid_o,
+	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_notify_ready_i,
+	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_mem_packet_valid_o,
+	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE*lpu_qctl_pkg::QCTL_OPERAND_WIDTH-1:0] qctl_mem_packet_ordinal_o,
+	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_mem_packet_retired_i,
+	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_configured_o,
+	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_primed_o,
+	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_done_o,
+	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_fault_o,
+	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE*4-1:0] qctl_fault_code_o,
 
 	input logic [PROGRAM_PORT_COUNT-1:0] program_valid_i,
 	output logic [PROGRAM_PORT_COUNT-1:0] program_ready_o,
@@ -163,34 +191,66 @@ module lpu_mem_subsystem #(
 			localparam integer PROGRAM_PORT_INDEX = queue_gen / PROGRAM_BANKS_PER_PORT;
 			logic frontend_run;
 			logic [31:0] frontend_schedule_cycle;
-			logic qctl_active_d_q;
+			logic qctl_scheduler_counter_ce;
 			logic [31:0] qctl_scheduler_cycle_q;
 
-			// QCTL controls only the selected Bank. The adjacent Bank retains its
-			// own local time and can continue independently.
+			// QCTL pauses only this Bank's Scheduler-facing Frontend. Execution
+			// already accepted by the MEM datapath continues independently.
 			assign frontend_run = local_frontend_enable_i &&
-				(qctl_active_i[queue_gen] ? qctl_scheduler_counter_ce_i[queue_gen] : run_i);
-			assign frontend_schedule_cycle = qctl_active_i[queue_gen] ?
+				(qctl_configured_o[queue_gen] ? qctl_scheduler_counter_ce : run_i);
+			assign frontend_schedule_cycle = qctl_configured_o[queue_gen] ?
 				qctl_scheduler_cycle_q : schedule_cycle_i;
-			assign qctl_scheduler_cycle_o[queue_gen*32+:32] = qctl_scheduler_cycle_q;
+
+			lpu_qctl_endpoint #(
+				.QUEUE_ENTRY_LIMIT(QCTL_QUEUE_ENTRY_LIMIT),
+				.CACHE_DEPTH(QCTL_CACHE_DEPTH),
+				.GENERATION_WIDTH(QCTL_GENERATION_WIDTH)
+			) u_qctl_endpoint (
+				.clk_i, .rst_ni, .clear_i(program_reset_i), .run_i(run_i),
+				.configure_valid_i(qctl_configure_valid_i[queue_gen]),
+				.configure_count_i(qctl_configure_count_i[
+					queue_gen*QCTL_ENTRY_COUNT_WIDTH+:QCTL_ENTRY_COUNT_WIDTH]),
+				.configure_generation_i(qctl_configure_generation_i[
+					queue_gen*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH]),
+				.pool_request_valid_o(qctl_pool_request_valid_o[queue_gen]),
+				.pool_request_ready_i(qctl_pool_request_ready_i[queue_gen]),
+				.pool_request_index_o(qctl_pool_request_index_o[
+					queue_gen*QCTL_ENTRY_INDEX_WIDTH+:QCTL_ENTRY_INDEX_WIDTH]),
+				.pool_request_generation_o(qctl_pool_request_generation_o[
+					queue_gen*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH]),
+				.pool_response_valid_i(qctl_pool_response_valid_i[queue_gen]),
+				.pool_response_data_i(qctl_pool_response_data_i),
+				.pool_response_error_i(qctl_pool_response_error_i),
+				.scheduler_cycle_i(qctl_scheduler_cycle_q),
+				.scheduler_counter_ce_o(qctl_scheduler_counter_ce),
+				.event_valid_i(qctl_event_valid_i[queue_gen]), .event_tag_i(qctl_event_tag_i),
+				.event_wait_o(qctl_event_wait_o[queue_gen]),
+				.event_consume_o(qctl_event_consume_o[queue_gen]),
+				.sync_arrive_valid_o(qctl_sync_arrive_valid_o[queue_gen]),
+				.sync_release_valid_i(qctl_sync_release_valid_i[queue_gen]),
+				.notify_valid_o(qctl_notify_valid_o[queue_gen]),
+				.notify_ready_i(qctl_notify_ready_i[queue_gen]),
+				.mem_packet_valid_o(qctl_mem_packet_valid_o[queue_gen]),
+				.mem_packet_ordinal_o(qctl_mem_packet_ordinal_o[
+					queue_gen*lpu_qctl_pkg::QCTL_OPERAND_WIDTH+:lpu_qctl_pkg::QCTL_OPERAND_WIDTH]),
+				.mem_packet_retired_i(qctl_mem_packet_retired_i[queue_gen]),
+				.configured_o(qctl_configured_o[queue_gen]),
+				.primed_o(qctl_primed_o[queue_gen]), .done_o(qctl_done_o[queue_gen]),
+				.fault_o(qctl_fault_o[queue_gen]),
+				.fault_code_o(qctl_fault_code_o[queue_gen*4+:4])
+			);
 
 			// The Bank Scheduler owns its local cycle. QCTL supplies only the
 			// counter-enable decision for the current physical edge.
 			always_ff @(posedge clk_i or negedge rst_ni) begin
 				if(!rst_ni)begin
-					qctl_active_d_q <= 1'b0;
 					qctl_scheduler_cycle_q <= '0;
 				end
-				else if(program_reset_i)begin
-					qctl_active_d_q <= 1'b0;
+				else if(program_reset_i || qctl_configure_valid_i[queue_gen])begin
 					qctl_scheduler_cycle_q <= '0;
 				end
 				else begin
-					qctl_active_d_q <= qctl_active_i[queue_gen];
-					if(!qctl_active_i[queue_gen] || !qctl_active_d_q)begin
-						qctl_scheduler_cycle_q <= '0;
-					end
-					else if(qctl_scheduler_counter_ce_i[queue_gen])begin
+					if(qctl_configured_o[queue_gen] && qctl_scheduler_counter_ce)begin
 						qctl_scheduler_cycle_q <= qctl_scheduler_cycle_q + 1'b1;
 					end
 				end
