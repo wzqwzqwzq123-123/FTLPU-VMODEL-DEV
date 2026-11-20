@@ -1,31 +1,12 @@
-// Unified direct-connect QCTL Fabric. Independent channels preserve isolation
-// between Pool reads, events, barrier traffic and MEM packet completion.
+// Runtime-only QCTL Fabric. Static Record distribution uses the independent
+// load-time Relay chains and never enters this module.
 module lpu_qctl_fabric #(
 	parameter integer QUEUE_COUNT = 220,
-	parameter integer QUEUE_ENTRY_LIMIT = 16,
-	parameter integer GENERATION_WIDTH = 64,
-	parameter integer QUEUE_ID_WIDTH = QUEUE_COUNT <= 1 ? 1 : $clog2(QUEUE_COUNT),
-	parameter integer ENTRY_INDEX_WIDTH = QUEUE_ENTRY_LIMIT <= 1 ? 1 : $clog2(QUEUE_ENTRY_LIMIT)
+	parameter integer QUEUE_ID_WIDTH = QUEUE_COUNT <= 1 ? 1 : $clog2(QUEUE_COUNT)
 ) (
 	input logic clk_i,
 	input logic rst_ni,
 	input logic clear_i,
-
-	input logic [QUEUE_COUNT-1:0] endpoint_pool_request_valid_i,
-	output logic [QUEUE_COUNT-1:0] endpoint_pool_request_ready_o,
-	input logic [QUEUE_COUNT*ENTRY_INDEX_WIDTH-1:0] endpoint_pool_request_index_i,
-	input logic [QUEUE_COUNT*GENERATION_WIDTH-1:0] endpoint_pool_request_generation_i,
-	output logic [QUEUE_COUNT-1:0] pool_request_valid_o,
-	input logic [QUEUE_COUNT-1:0] pool_request_ready_i,
-	output logic [QUEUE_COUNT*ENTRY_INDEX_WIDTH-1:0] pool_request_index_o,
-	output logic [QUEUE_COUNT*GENERATION_WIDTH-1:0] pool_request_generation_o,
-	input logic pool_response_valid_i,
-	input logic [QUEUE_ID_WIDTH-1:0] pool_response_queue_i,
-	input logic [lpu_qctl_pkg::QCTL_RECORD_WIDTH-1:0] pool_response_data_i,
-	input logic pool_response_error_i,
-	output logic [QUEUE_COUNT-1:0] endpoint_pool_response_valid_o,
-	output logic [lpu_qctl_pkg::QCTL_RECORD_WIDTH-1:0] endpoint_pool_response_data_o,
-	output logic endpoint_pool_response_error_o,
 
 	input logic event_in_valid_i,
 	input logic event_in_ready_i,
@@ -70,12 +51,6 @@ module lpu_qctl_fabric #(
 	logic fault_q;
 	logic [3:0] fault_code_q;
 
-	assign pool_request_valid_o = endpoint_pool_request_valid_i;
-	assign endpoint_pool_request_ready_o = pool_request_ready_i;
-	assign pool_request_index_o = endpoint_pool_request_index_i;
-	assign pool_request_generation_o = endpoint_pool_request_generation_i;
-	assign endpoint_pool_response_data_o = pool_response_data_i;
-	assign endpoint_pool_response_error_o = pool_response_error_i;
 	assign event_backpressure_o = event_in_valid_i && !event_in_ready_i;
 	assign event_wait_o = endpoint_event_wait_i;
 	assign event_consume_o = endpoint_event_consume_i;
@@ -95,15 +70,6 @@ module lpu_qctl_fabric #(
 	assign endpoint_sync_release_valid_o = release_mask_q;
 	assign fault_o = fault_q;
 	assign fault_code_o = fault_code_q;
-
-	// Decode the tagged Pool response into a one-hot response for the owning
-	// FU-local Cache while retaining one shared data and error channel.
-	always_comb begin
-		endpoint_pool_response_valid_o = '0;
-		if(pool_response_valid_i && (pool_response_queue_i < QUEUE_COUNT))begin
-			endpoint_pool_response_valid_o[pool_response_queue_i] = 1'b1;
-		end
-	end
 
 	// Round-robin arbitration accepts at most one NOTIFY after all configured
 	// participants have reached the current SYNC round.

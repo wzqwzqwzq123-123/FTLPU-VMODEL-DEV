@@ -68,7 +68,7 @@ module lpu_qctl_controller (
 	assign fault_o = fault_q;
 	assign fault_code_o = fault_code_q;
 
-	// The semantic FSM holds the Cache head until the matching global condition
+	// The semantic FSM holds the regional Queue head until the matching global condition
 	// completes. A boundary hit is handled before the local counter can advance.
 	always_comb begin
 		state_d = state_q;
@@ -174,8 +174,8 @@ module lpu_qctl_controller (
 		endcase
 	end
 
-	// The Scheduler counter advances only while the next cached control boundary
-	// is known to be in the future. Empty-but-not-done Cache state is a safe stall.
+	// The Scheduler counter advances only while the next regional control boundary
+	// is known to be in the future. Missing-but-not-done head state is a safe stall.
 	always_comb begin
 		scheduler_counter_ce_o = 1'b0;
 		if(run_i && configured_i && primed_i && !fault_q && (state_q == ST_IDLE))begin

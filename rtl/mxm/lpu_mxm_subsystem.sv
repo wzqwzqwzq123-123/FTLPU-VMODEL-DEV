@@ -7,7 +7,6 @@ module lpu_mxm_subsystem #(
 	parameter integer ACCUMULATOR_BLOCK_COUNT = lpu_pkg::MXM_ACCUMULATOR_BLOCK_COUNT,
 	parameter bit PAIR_LOAD_DEQUANT = 1'b0,
 	parameter integer QCTL_QUEUE_ENTRY_LIMIT = 16,
-	parameter integer QCTL_CACHE_DEPTH = 4,
 	parameter integer QCTL_GENERATION_WIDTH = 64,
 	parameter integer QCTL_ENTRY_INDEX_WIDTH = QCTL_QUEUE_ENTRY_LIMIT <= 1 ? 1 : $clog2(QCTL_QUEUE_ENTRY_LIMIT),
 	parameter integer QCTL_ENTRY_COUNT_WIDTH = $clog2(QCTL_QUEUE_ENTRY_LIMIT + 1)
@@ -21,13 +20,12 @@ module lpu_mxm_subsystem #(
 	input logic [2:0] qctl_configure_valid_i,
 	input logic [3*QCTL_ENTRY_COUNT_WIDTH-1:0] qctl_configure_count_i,
 	input logic [3*QCTL_GENERATION_WIDTH-1:0] qctl_configure_generation_i,
-	output logic [2:0] qctl_pool_request_valid_o,
-	input logic [2:0] qctl_pool_request_ready_i,
-	output logic [3*QCTL_ENTRY_INDEX_WIDTH-1:0] qctl_pool_request_index_o,
-	output logic [3*QCTL_GENERATION_WIDTH-1:0] qctl_pool_request_generation_o,
-	input logic [2:0] qctl_pool_response_valid_i,
-	input logic [lpu_qctl_pkg::QCTL_RECORD_WIDTH-1:0] qctl_pool_response_data_i,
-	input logic qctl_pool_response_error_i,
+	output logic [3*QCTL_ENTRY_INDEX_WIDTH-1:0] qctl_head_index_o,
+	output logic [3*QCTL_GENERATION_WIDTH-1:0] qctl_head_generation_o,
+	input logic [2:0] qctl_store_loaded_i,
+	input logic [2:0] qctl_head_valid_i,
+	input logic [3*lpu_qctl_pkg::QCTL_RECORD_WIDTH-1:0] qctl_head_record_i,
+	input logic [2:0] qctl_head_error_i,
 	input logic [2:0] qctl_event_valid_i,
 	input logic [lpu_qctl_pkg::QCTL_OPERAND_WIDTH-1:0] qctl_event_tag_i,
 	output logic [2:0] qctl_event_wait_o,
@@ -184,7 +182,6 @@ module lpu_mxm_subsystem #(
 
 			lpu_qctl_endpoint #(
 				.QUEUE_ENTRY_LIMIT(QCTL_QUEUE_ENTRY_LIMIT),
-				.CACHE_DEPTH(QCTL_CACHE_DEPTH),
 				.GENERATION_WIDTH(QCTL_GENERATION_WIDTH)
 			) u_qctl_endpoint (
 				.clk_i, .rst_ni, .clear_i(program_reset_i), .run_i(run_i),
@@ -193,15 +190,15 @@ module lpu_mxm_subsystem #(
 					stream_index*QCTL_ENTRY_COUNT_WIDTH+:QCTL_ENTRY_COUNT_WIDTH]),
 				.configure_generation_i(qctl_configure_generation_i[
 					stream_index*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH]),
-				.pool_request_valid_o(qctl_pool_request_valid_o[stream_index]),
-				.pool_request_ready_i(qctl_pool_request_ready_i[stream_index]),
-				.pool_request_index_o(qctl_pool_request_index_o[
+				.store_head_index_o(qctl_head_index_o[
 					stream_index*QCTL_ENTRY_INDEX_WIDTH+:QCTL_ENTRY_INDEX_WIDTH]),
-				.pool_request_generation_o(qctl_pool_request_generation_o[
+				.store_head_generation_o(qctl_head_generation_o[
 					stream_index*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH]),
-				.pool_response_valid_i(qctl_pool_response_valid_i[stream_index]),
-				.pool_response_data_i(qctl_pool_response_data_i),
-				.pool_response_error_i(qctl_pool_response_error_i),
+				.store_loaded_i(qctl_store_loaded_i[stream_index]),
+				.store_head_valid_i(qctl_head_valid_i[stream_index]),
+				.store_head_record_i(qctl_head_record_i[
+					stream_index*lpu_qctl_pkg::QCTL_RECORD_WIDTH+:lpu_qctl_pkg::QCTL_RECORD_WIDTH]),
+				.store_head_error_i(qctl_head_error_i[stream_index]),
 				.scheduler_cycle_i(qctl_scheduler_cycle_q[stream_index*32+:32]),
 				.scheduler_counter_ce_o(qctl_scheduler_counter_ce[stream_index]),
 				.event_valid_i(qctl_event_valid_i[stream_index]), .event_tag_i(qctl_event_tag_i),

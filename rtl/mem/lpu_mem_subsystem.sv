@@ -9,7 +9,6 @@ module lpu_mem_subsystem #(
 	parameter bit USE_SRAM_MACRO = 1'b0,
 	parameter bit USE_NATIVE_MEM = 1'b1,
 	parameter integer QCTL_QUEUE_ENTRY_LIMIT = 16,
-	parameter integer QCTL_CACHE_DEPTH = 4,
 	parameter integer QCTL_GENERATION_WIDTH = 64,
 	parameter integer QCTL_ENTRY_INDEX_WIDTH = QCTL_QUEUE_ENTRY_LIMIT <= 1 ? 1 : $clog2(QCTL_QUEUE_ENTRY_LIMIT),
 	parameter integer QCTL_ENTRY_COUNT_WIDTH = $clog2(QCTL_QUEUE_ENTRY_LIMIT + 1)
@@ -23,13 +22,12 @@ module lpu_mem_subsystem #(
 	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_configure_valid_i,
 	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE*QCTL_ENTRY_COUNT_WIDTH-1:0] qctl_configure_count_i,
 	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE*QCTL_GENERATION_WIDTH-1:0] qctl_configure_generation_i,
-	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_pool_request_valid_o,
-	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_pool_request_ready_i,
-	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE*QCTL_ENTRY_INDEX_WIDTH-1:0] qctl_pool_request_index_o,
-	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE*QCTL_GENERATION_WIDTH-1:0] qctl_pool_request_generation_o,
-	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_pool_response_valid_i,
-	input logic [lpu_qctl_pkg::QCTL_RECORD_WIDTH-1:0] qctl_pool_response_data_i,
-	input logic qctl_pool_response_error_i,
+	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE*QCTL_ENTRY_INDEX_WIDTH-1:0] qctl_head_index_o,
+	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE*QCTL_GENERATION_WIDTH-1:0] qctl_head_generation_o,
+	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_store_loaded_i,
+	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_head_valid_i,
+	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE*lpu_qctl_pkg::QCTL_RECORD_WIDTH-1:0] qctl_head_record_i,
+	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_head_error_i,
 	input logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_event_valid_i,
 	input logic [lpu_qctl_pkg::QCTL_OPERAND_WIDTH-1:0] qctl_event_tag_i,
 	output logic [lpu_pkg::MEM_BANKS_PER_HEMISPHERE-1:0] qctl_event_wait_o,
@@ -203,7 +201,6 @@ module lpu_mem_subsystem #(
 
 			lpu_qctl_endpoint #(
 				.QUEUE_ENTRY_LIMIT(QCTL_QUEUE_ENTRY_LIMIT),
-				.CACHE_DEPTH(QCTL_CACHE_DEPTH),
 				.GENERATION_WIDTH(QCTL_GENERATION_WIDTH)
 			) u_qctl_endpoint (
 				.clk_i, .rst_ni, .clear_i(program_reset_i), .run_i(run_i),
@@ -212,15 +209,15 @@ module lpu_mem_subsystem #(
 					queue_gen*QCTL_ENTRY_COUNT_WIDTH+:QCTL_ENTRY_COUNT_WIDTH]),
 				.configure_generation_i(qctl_configure_generation_i[
 					queue_gen*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH]),
-				.pool_request_valid_o(qctl_pool_request_valid_o[queue_gen]),
-				.pool_request_ready_i(qctl_pool_request_ready_i[queue_gen]),
-				.pool_request_index_o(qctl_pool_request_index_o[
+				.store_head_index_o(qctl_head_index_o[
 					queue_gen*QCTL_ENTRY_INDEX_WIDTH+:QCTL_ENTRY_INDEX_WIDTH]),
-				.pool_request_generation_o(qctl_pool_request_generation_o[
+				.store_head_generation_o(qctl_head_generation_o[
 					queue_gen*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH]),
-				.pool_response_valid_i(qctl_pool_response_valid_i[queue_gen]),
-				.pool_response_data_i(qctl_pool_response_data_i),
-				.pool_response_error_i(qctl_pool_response_error_i),
+				.store_loaded_i(qctl_store_loaded_i[queue_gen]),
+				.store_head_valid_i(qctl_head_valid_i[queue_gen]),
+				.store_head_record_i(qctl_head_record_i[
+					queue_gen*lpu_qctl_pkg::QCTL_RECORD_WIDTH+:lpu_qctl_pkg::QCTL_RECORD_WIDTH]),
+				.store_head_error_i(qctl_head_error_i[queue_gen]),
 				.scheduler_cycle_i(qctl_scheduler_cycle_q),
 				.scheduler_counter_ce_o(qctl_scheduler_counter_ce),
 				.event_valid_i(qctl_event_valid_i[queue_gen]), .event_tag_i(qctl_event_tag_i),

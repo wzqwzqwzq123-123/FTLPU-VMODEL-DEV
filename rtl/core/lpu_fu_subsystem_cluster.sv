@@ -9,9 +9,10 @@ module lpu_fu_subsystem_cluster #(
 	parameter bit USE_NATIVE_MEM = 1'b1,
 	parameter bit ENABLE_QCTL = 1'b0,
 	parameter integer QCTL_QUEUE_COUNT = 220,
-	parameter integer QCTL_POOL_DEPTH = 512,
+	parameter integer QCTL_TOTAL_CAPACITY = 512,
 	parameter integer QCTL_QUEUE_ENTRY_LIMIT = 16,
-	parameter integer QCTL_CACHE_DEPTH = 4
+	parameter integer QCTL_REGION_DEPTH = 64,
+	parameter integer QCTL_RELAY_BUFFER_DEPTH = 2
 ) (
 	input logic clk_i,
 	input logic rst_ni,
@@ -151,13 +152,12 @@ module lpu_fu_subsystem_cluster #(
 	logic [QCTL_QUEUE_COUNT-1:0] qctl_configure_valid;
 	logic [QCTL_QUEUE_COUNT*QCTL_ENTRY_COUNT_WIDTH-1:0] qctl_configure_count;
 	logic [QCTL_QUEUE_COUNT*QCTL_GENERATION_WIDTH-1:0] qctl_configure_generation;
-	logic [QCTL_QUEUE_COUNT-1:0] qctl_pool_request_valid;
-	logic [QCTL_QUEUE_COUNT-1:0] qctl_pool_request_ready;
-	logic [QCTL_QUEUE_COUNT*QCTL_ENTRY_INDEX_WIDTH-1:0] qctl_pool_request_index;
-	logic [QCTL_QUEUE_COUNT*QCTL_GENERATION_WIDTH-1:0] qctl_pool_request_generation;
-	logic [QCTL_QUEUE_COUNT-1:0] qctl_pool_response_valid;
-	logic [lpu_qctl_pkg::QCTL_RECORD_WIDTH-1:0] qctl_pool_response_data;
-	logic qctl_pool_response_error;
+	logic [QCTL_QUEUE_COUNT*QCTL_ENTRY_INDEX_WIDTH-1:0] qctl_head_index;
+	logic [QCTL_QUEUE_COUNT*QCTL_GENERATION_WIDTH-1:0] qctl_head_generation;
+	logic [QCTL_QUEUE_COUNT-1:0] qctl_store_loaded;
+	logic [QCTL_QUEUE_COUNT-1:0] qctl_head_valid;
+	logic [QCTL_QUEUE_COUNT*lpu_qctl_pkg::QCTL_RECORD_WIDTH-1:0] qctl_head_record;
+	logic [QCTL_QUEUE_COUNT-1:0] qctl_head_error;
 	logic [QCTL_QUEUE_COUNT-1:0] qctl_event_valid;
 	logic [lpu_qctl_pkg::QCTL_OPERAND_WIDTH-1:0] qctl_event_tag;
 	logic [QCTL_QUEUE_COUNT-1:0] qctl_event_wait;
@@ -176,6 +176,7 @@ module lpu_fu_subsystem_cluster #(
 	logic [QCTL_QUEUE_COUNT*4-1:0] qctl_endpoint_fault_code;
 	logic qctl_all_primed;
 	logic qctl_all_done;
+	logic qctl_load_complete;
 
 	assign execution_run = started_q;
 	assign qctl_primed_o = ENABLE_QCTL ? qctl_endpoint_primed : '1;
@@ -191,14 +192,16 @@ module lpu_fu_subsystem_cluster #(
 	assign frontend_fault_code_o = ((|mem_frontend_fault) || (|mxm_frontend_fault)) ?
 		FAULT_FRONTEND : ((ENABLE_QCTL && qctl_fault_o) ? FAULT_QCTL : FAULT_NONE);
 
-	// The global QCTL Subsystem owns only shared Pool/Event/Fabric resources.
-	// Cache and Controller instances are physically owned by MEM/MXM Subsystems.
+	// The global QCTL Subsystem owns load-time Relay stores and runtime shared resources.
+	// Queue-reader and Controller state remains physically beside each MEM/MXM Scheduler.
 	generate
 		if(ENABLE_QCTL)begin : gen_qctl
 			lpu_qctl_global_subsystem #(
-				.POOL_DEPTH(QCTL_POOL_DEPTH),
+				.TOTAL_CAPACITY(QCTL_TOTAL_CAPACITY),
 				.QUEUE_COUNT(QCTL_QUEUE_COUNT),
-				.QUEUE_ENTRY_LIMIT(QCTL_QUEUE_ENTRY_LIMIT)
+				.QUEUE_ENTRY_LIMIT(QCTL_QUEUE_ENTRY_LIMIT),
+				.REGION_DEPTH(QCTL_REGION_DEPTH),
+				.RELAY_BUFFER_DEPTH(QCTL_RELAY_BUFFER_DEPTH)
 			) u_qctl_global_subsystem (
 				.clk_i, .rst_ni, .clear_i(program_reset_i), .load_mode_i(qctl_load_mode_i),
 				.partition_valid_i(qctl_partition_valid_i), .partition_ready_o(qctl_partition_ready_o),
@@ -209,13 +212,12 @@ module lpu_fu_subsystem_cluster #(
 				.endpoint_configure_valid_o(qctl_configure_valid),
 				.endpoint_configure_count_o(qctl_configure_count),
 				.endpoint_configure_generation_o(qctl_configure_generation),
-				.endpoint_pool_request_valid_i(qctl_pool_request_valid),
-				.endpoint_pool_request_ready_o(qctl_pool_request_ready),
-				.endpoint_pool_request_index_i(qctl_pool_request_index),
-				.endpoint_pool_request_generation_i(qctl_pool_request_generation),
-				.endpoint_pool_response_valid_o(qctl_pool_response_valid),
-				.endpoint_pool_response_data_o(qctl_pool_response_data),
-				.endpoint_pool_response_error_o(qctl_pool_response_error),
+				.endpoint_head_index_i(qctl_head_index),
+				.endpoint_head_generation_i(qctl_head_generation),
+				.endpoint_store_loaded_o(qctl_store_loaded),
+				.endpoint_head_valid_o(qctl_head_valid),
+				.endpoint_head_record_o(qctl_head_record),
+				.endpoint_head_error_o(qctl_head_error),
 				.event_in_valid_i(qctl_event_valid_i), .event_in_ready_o(qctl_event_ready_o),
 				.event_in_tag_i(qctl_event_tag_i), .event_in_target_mask_i(qctl_event_target_mask_i),
 				.event_backpressure_o(qctl_event_backpressure_o),
@@ -237,6 +239,7 @@ module lpu_fu_subsystem_cluster #(
 				.endpoint_fault_i(qctl_endpoint_fault),
 				.endpoint_fault_code_i(qctl_endpoint_fault_code),
 				.queue_active_o(qctl_queue_active_o),
+				.load_complete_o(qctl_load_complete),
 				.all_primed_o(qctl_all_primed),
 				.all_done_o(qctl_all_done),
 				.fault_o(qctl_fault_o), .fault_code_o(qctl_fault_code_o)
@@ -251,10 +254,10 @@ module lpu_fu_subsystem_cluster #(
 			assign qctl_configure_valid = '0;
 			assign qctl_configure_count = '0;
 			assign qctl_configure_generation = '0;
-			assign qctl_pool_request_ready = '0;
-			assign qctl_pool_response_valid = '0;
-			assign qctl_pool_response_data = '0;
-			assign qctl_pool_response_error = 1'b0;
+			assign qctl_store_loaded = '0;
+			assign qctl_head_valid = '0;
+			assign qctl_head_record = '0;
+			assign qctl_head_error = '0;
 			assign qctl_event_valid = '0;
 			assign qctl_event_tag = '0;
 			assign qctl_sync_release = '0;
@@ -266,6 +269,7 @@ module lpu_fu_subsystem_cluster #(
 			assign qctl_wait_event_blocked_o = '0;
 			assign qctl_all_primed = 1'b1;
 			assign qctl_all_done = 1'b1;
+			assign qctl_load_complete = 1'b1;
 			assign qctl_fault_o = 1'b0;
 			assign qctl_fault_code_o = '0;
 		end
@@ -328,8 +332,7 @@ module lpu_fu_subsystem_cluster #(
 				.ACTIVE_COLUMNS(ACTIVE_MEM_COLUMNS),
 				.USE_SRAM_MACRO(USE_SRAM_MACRO),
 				.USE_NATIVE_MEM(USE_NATIVE_MEM),
-				.QCTL_QUEUE_ENTRY_LIMIT(QCTL_QUEUE_ENTRY_LIMIT),
-				.QCTL_CACHE_DEPTH(QCTL_CACHE_DEPTH)
+				.QCTL_QUEUE_ENTRY_LIMIT(QCTL_QUEUE_ENTRY_LIMIT)
 			) u_mem_subsystem (
 				.clk_i, .rst_ni, .program_reset_i, .local_frontend_enable_i(1'b1),
 				.run_i(execution_run), .schedule_cycle_i(schedule_cycle_q),
@@ -341,20 +344,21 @@ module lpu_fu_subsystem_cluster #(
 				.qctl_configure_generation_i(qctl_configure_generation[
 					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE*QCTL_GENERATION_WIDTH+:
 					lpu_pkg::MEM_BANKS_PER_HEMISPHERE*QCTL_GENERATION_WIDTH]),
-				.qctl_pool_request_valid_o(qctl_pool_request_valid[
-					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
-				.qctl_pool_request_ready_i(qctl_pool_request_ready[
-					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
-				.qctl_pool_request_index_o(qctl_pool_request_index[
+				.qctl_head_index_o(qctl_head_index[
 					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE*QCTL_ENTRY_INDEX_WIDTH+:
 					lpu_pkg::MEM_BANKS_PER_HEMISPHERE*QCTL_ENTRY_INDEX_WIDTH]),
-				.qctl_pool_request_generation_o(qctl_pool_request_generation[
+				.qctl_head_generation_o(qctl_head_generation[
 					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE*QCTL_GENERATION_WIDTH+:
 					lpu_pkg::MEM_BANKS_PER_HEMISPHERE*QCTL_GENERATION_WIDTH]),
-				.qctl_pool_response_valid_i(qctl_pool_response_valid[
+				.qctl_store_loaded_i(qctl_store_loaded[
 					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
-				.qctl_pool_response_data_i(qctl_pool_response_data),
-				.qctl_pool_response_error_i(qctl_pool_response_error),
+				.qctl_head_valid_i(qctl_head_valid[
+					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
+				.qctl_head_record_i(qctl_head_record[
+					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE*lpu_qctl_pkg::QCTL_RECORD_WIDTH+:
+					lpu_pkg::MEM_BANKS_PER_HEMISPHERE*lpu_qctl_pkg::QCTL_RECORD_WIDTH]),
+				.qctl_head_error_i(qctl_head_error[
+					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
 				.qctl_event_valid_i(qctl_event_valid[
 					HEMISPHERE_INDEX*lpu_pkg::MEM_BANKS_PER_HEMISPHERE+:lpu_pkg::MEM_BANKS_PER_HEMISPHERE]),
 				.qctl_event_tag_i(qctl_event_tag),
@@ -465,8 +469,7 @@ module lpu_fu_subsystem_cluster #(
 					.IMEM_DEPTH(MXM_IMEM_DEPTH),
 					.ACTIVE_CONTEXTS(ACTIVE_CONTEXTS),
 					.ACCUMULATOR_BLOCK_COUNT(MXM_ACCUMULATOR_BLOCK_COUNT),
-					.QCTL_QUEUE_ENTRY_LIMIT(QCTL_QUEUE_ENTRY_LIMIT),
-					.QCTL_CACHE_DEPTH(QCTL_CACHE_DEPTH)
+					.QCTL_QUEUE_ENTRY_LIMIT(QCTL_QUEUE_ENTRY_LIMIT)
 				) u_mxm_subsystem (
 					.clk_i, .rst_ni, .program_reset_i, .local_frontend_enable_i(1'b1),
 					.run_i(execution_run), .schedule_cycle_i(schedule_cycle_q),
@@ -482,28 +485,30 @@ module lpu_fu_subsystem_cluster #(
 						qctl_configure_generation[(QCTL_MXM_COMPUTE_BASE+MXM_INDEX)*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH],
 						qctl_configure_generation[(QCTL_MXM_DEQUANT_BASE+MXM_INDEX)*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH],
 						qctl_configure_generation[(QCTL_MXM_LOAD_BASE+MXM_INDEX)*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH]}),
-					.qctl_pool_request_valid_o({
-						qctl_pool_request_valid[QCTL_MXM_COMPUTE_BASE+MXM_INDEX],
-						qctl_pool_request_valid[QCTL_MXM_DEQUANT_BASE+MXM_INDEX],
-						qctl_pool_request_valid[QCTL_MXM_LOAD_BASE+MXM_INDEX]}),
-					.qctl_pool_request_ready_i({
-						qctl_pool_request_ready[QCTL_MXM_COMPUTE_BASE+MXM_INDEX],
-						qctl_pool_request_ready[QCTL_MXM_DEQUANT_BASE+MXM_INDEX],
-						qctl_pool_request_ready[QCTL_MXM_LOAD_BASE+MXM_INDEX]}),
-					.qctl_pool_request_index_o({
-						qctl_pool_request_index[(QCTL_MXM_COMPUTE_BASE+MXM_INDEX)*QCTL_ENTRY_INDEX_WIDTH+:QCTL_ENTRY_INDEX_WIDTH],
-						qctl_pool_request_index[(QCTL_MXM_DEQUANT_BASE+MXM_INDEX)*QCTL_ENTRY_INDEX_WIDTH+:QCTL_ENTRY_INDEX_WIDTH],
-						qctl_pool_request_index[(QCTL_MXM_LOAD_BASE+MXM_INDEX)*QCTL_ENTRY_INDEX_WIDTH+:QCTL_ENTRY_INDEX_WIDTH]}),
-					.qctl_pool_request_generation_o({
-						qctl_pool_request_generation[(QCTL_MXM_COMPUTE_BASE+MXM_INDEX)*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH],
-						qctl_pool_request_generation[(QCTL_MXM_DEQUANT_BASE+MXM_INDEX)*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH],
-						qctl_pool_request_generation[(QCTL_MXM_LOAD_BASE+MXM_INDEX)*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH]}),
-					.qctl_pool_response_valid_i({
-						qctl_pool_response_valid[QCTL_MXM_COMPUTE_BASE+MXM_INDEX],
-						qctl_pool_response_valid[QCTL_MXM_DEQUANT_BASE+MXM_INDEX],
-						qctl_pool_response_valid[QCTL_MXM_LOAD_BASE+MXM_INDEX]}),
-					.qctl_pool_response_data_i(qctl_pool_response_data),
-					.qctl_pool_response_error_i(qctl_pool_response_error),
+					.qctl_head_index_o({
+						qctl_head_index[(QCTL_MXM_COMPUTE_BASE+MXM_INDEX)*QCTL_ENTRY_INDEX_WIDTH+:QCTL_ENTRY_INDEX_WIDTH],
+						qctl_head_index[(QCTL_MXM_DEQUANT_BASE+MXM_INDEX)*QCTL_ENTRY_INDEX_WIDTH+:QCTL_ENTRY_INDEX_WIDTH],
+						qctl_head_index[(QCTL_MXM_LOAD_BASE+MXM_INDEX)*QCTL_ENTRY_INDEX_WIDTH+:QCTL_ENTRY_INDEX_WIDTH]}),
+					.qctl_head_generation_o({
+						qctl_head_generation[(QCTL_MXM_COMPUTE_BASE+MXM_INDEX)*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH],
+						qctl_head_generation[(QCTL_MXM_DEQUANT_BASE+MXM_INDEX)*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH],
+						qctl_head_generation[(QCTL_MXM_LOAD_BASE+MXM_INDEX)*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH]}),
+					.qctl_store_loaded_i({
+						qctl_store_loaded[QCTL_MXM_COMPUTE_BASE+MXM_INDEX],
+						qctl_store_loaded[QCTL_MXM_DEQUANT_BASE+MXM_INDEX],
+						qctl_store_loaded[QCTL_MXM_LOAD_BASE+MXM_INDEX]}),
+					.qctl_head_valid_i({
+						qctl_head_valid[QCTL_MXM_COMPUTE_BASE+MXM_INDEX],
+						qctl_head_valid[QCTL_MXM_DEQUANT_BASE+MXM_INDEX],
+						qctl_head_valid[QCTL_MXM_LOAD_BASE+MXM_INDEX]}),
+					.qctl_head_record_i({
+						qctl_head_record[(QCTL_MXM_COMPUTE_BASE+MXM_INDEX)*lpu_qctl_pkg::QCTL_RECORD_WIDTH+:lpu_qctl_pkg::QCTL_RECORD_WIDTH],
+						qctl_head_record[(QCTL_MXM_DEQUANT_BASE+MXM_INDEX)*lpu_qctl_pkg::QCTL_RECORD_WIDTH+:lpu_qctl_pkg::QCTL_RECORD_WIDTH],
+						qctl_head_record[(QCTL_MXM_LOAD_BASE+MXM_INDEX)*lpu_qctl_pkg::QCTL_RECORD_WIDTH+:lpu_qctl_pkg::QCTL_RECORD_WIDTH]}),
+					.qctl_head_error_i({
+						qctl_head_error[QCTL_MXM_COMPUTE_BASE+MXM_INDEX],
+						qctl_head_error[QCTL_MXM_DEQUANT_BASE+MXM_INDEX],
+						qctl_head_error[QCTL_MXM_LOAD_BASE+MXM_INDEX]}),
 					.qctl_event_valid_i({qctl_event_valid[QCTL_MXM_COMPUTE_BASE+MXM_INDEX],
 						qctl_event_valid[QCTL_MXM_DEQUANT_BASE+MXM_INDEX],
 						qctl_event_valid[QCTL_MXM_LOAD_BASE+MXM_INDEX]}),
