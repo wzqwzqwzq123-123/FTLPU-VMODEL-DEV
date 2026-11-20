@@ -54,11 +54,11 @@ module lpu_sxm_permute_macro_decoder (
 	logic [3:0] output_row_w;
 	logic [2:0] output_tile_w;
 	logic [1:0] map_stride_groups_w;
-	logic header_invalid_w;
-	logic reserved_invalid_w;
-	logic schedule_invalid_w;
-	logic stream_invalid_w;
-	logic selector_invalid_w;
+	logic header_illegal_w;
+	logic reserved_bits_illegal_w;
+	logic schedule_illegal_w;
+	logic stream_range_illegal_w;
+	logic selector_illegal_w;
 	logic word_fire;
 	logic context_fire;
 
@@ -103,20 +103,20 @@ module lpu_sxm_permute_macro_decoder (
 		output_tile_w = payload_w[282:280];
 		map_stride_groups_w = payload_w[284:283];
 
-		header_invalid_w = (packet_word_q[0][7:0] != 8'h43)
+		header_illegal_w = (packet_word_q[0][7:0] != 8'h43)
 			|| (packet_word_q[1][7:0] != 8'h47)
 			|| (packet_word_q[2][7:0] != 8'h4b)
 			|| (packet_word_q[3][7:0] != 8'h4f)
 			|| (packet_word_q[0][91:88] != 4'd2);
-		reserved_invalid_w = |payload_w[347:285];
-		schedule_invalid_w = (inner_interval_w == 0) || (outer_interval_w == 0)
+		reserved_bits_illegal_w = |payload_w[347:285];
+		schedule_illegal_w = (inner_interval_w == 0) || (outer_interval_w == 0)
 			|| ((outer_count_w > 1) && (outer_interval_w <= inner_cycle_span_w))
 			|| (total_cycle_span_w >= 64'd16777216);
-		stream_invalid_w = ({1'b0, source_base_w} + 7'd16 > 7'd64)
+		stream_range_illegal_w = ({1'b0, source_base_w} + 7'd16 > 7'd64)
 			|| ({1'b0, destination_base_w} + 7'd16 > 7'd64)
 			|| (source_base_w[5] != (source_base_w + 6'd15) >> 5)
 			|| (destination_base_w[5] != (destination_base_w + 6'd15) >> 5);
-		selector_invalid_w = (output_row_w > 15) || (output_tile_w > 4);
+		selector_illegal_w = (output_row_w > 15) || (output_tile_w > 4);
 
 		native_instruction_w = '0;
 		native_instruction_w[1:0] = 2'd3;
@@ -173,7 +173,7 @@ module lpu_sxm_permute_macro_decoder (
 		end
 		else begin
 			if(context_fire) context_valid_q <= 1'b0;
-			if(decode_pending_q && !header_invalid_w && !reserved_invalid_w && !schedule_invalid_w && !stream_invalid_w && !selector_invalid_w)begin
+			if(decode_pending_q && !header_illegal_w && !reserved_bits_illegal_w && !schedule_illegal_w && !stream_range_illegal_w && !selector_illegal_w)begin
 				context_valid_q <= 1'b1;
 				context_instruction_q <= native_instruction_w;
 				context_wait_cycle_q <= {8'd0, payload_w[23:0]};
@@ -199,23 +199,23 @@ module lpu_sxm_permute_macro_decoder (
 				fault_q <= 1'b1;
 				fault_code_q <= FAULT_TRUNCATED;
 			end
-			else if(decode_pending_q && header_invalid_w)begin
+			else if(decode_pending_q && header_illegal_w)begin
 				fault_q <= 1'b1;
 				fault_code_q <= FAULT_HEADER;
 			end
-			else if(decode_pending_q && reserved_invalid_w)begin
+			else if(decode_pending_q && reserved_bits_illegal_w)begin
 				fault_q <= 1'b1;
 				fault_code_q <= FAULT_RESERVED;
 			end
-			else if(decode_pending_q && schedule_invalid_w)begin
+			else if(decode_pending_q && schedule_illegal_w)begin
 				fault_q <= 1'b1;
 				fault_code_q <= FAULT_SCHEDULE;
 			end
-			else if(decode_pending_q && stream_invalid_w)begin
+			else if(decode_pending_q && stream_range_illegal_w)begin
 				fault_q <= 1'b1;
 				fault_code_q <= FAULT_STREAM;
 			end
-			else if(decode_pending_q && selector_invalid_w)begin
+			else if(decode_pending_q && selector_illegal_w)begin
 				fault_q <= 1'b1;
 				fault_code_q <= FAULT_SELECTOR;
 			end

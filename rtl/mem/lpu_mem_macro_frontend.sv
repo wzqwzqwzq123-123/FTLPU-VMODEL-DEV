@@ -1,8 +1,7 @@
 module lpu_mem_macro_frontend #(
 	parameter integer ACTIVE_CONTEXTS = 4,
 	parameter integer WORD_FIFO_DEPTH = 4,
-	parameter integer CONTEXT_FIFO_DEPTH = 4,
-	parameter integer ISSUE_FIFO_DEPTH = 4
+	parameter integer CONTEXT_FIFO_DEPTH = 4
 ) (
 	input logic clk_i,
 	input logic rst_ni,
@@ -10,20 +9,19 @@ module lpu_mem_macro_frontend #(
 	input logic prime_i,
 	input logic [31:0] schedule_cycle_i,
 
-	input  logic        word_valid_i,
-	output logic        word_ready_o,
-	input  logic [95:0] word_i,
-	input  logic        word_last_i,
+	input  logic        fetch_word_valid_i,
+	output logic        fetch_word_ready_o,
+	input  logic [95:0] fetch_word_i,
+	input  logic        fetch_word_last_i,
 
-	output logic        issue_valid_o,
-	input  logic        issue_ready_i,
-	output logic [lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] issue_instruction_o,
-	output logic [31:0] issue_cycle_o,
+	output logic        mem_issue_valid_o,
+	input  logic        mem_issue_ready_i,
+	output logic [lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] mem_issue_instruction_o,
+	output logic [31:0] mem_issue_cycle_o,
 
 	output logic        decoder_done_o,
 	output logic [$clog2(WORD_FIFO_DEPTH+1)-1:0] word_fifo_level_o,
 	output logic [$clog2(CONTEXT_FIFO_DEPTH+1)-1:0] context_fifo_level_o,
-	output logic [$clog2(ISSUE_FIFO_DEPTH+1)-1:0] issue_fifo_level_o,
 	output logic [$clog2(ACTIVE_CONTEXTS+1)-1:0] active_count_o,
 	output logic        idle_o,
 	output logic        prime_ready_o,
@@ -75,12 +73,12 @@ module lpu_mem_macro_frontend #(
 
 	assign fault_o = decoder_fault || scheduler_fault;
 	assign fault_code_o = decoder_fault ? {1'b0, decoder_fault_code} : {1'b1, scheduler_fault_code};
-	assign word_fifo_enqueue_valid = word_valid_i && !fault_o;
-	assign word_ready_o = word_fifo_enqueue_ready && !fault_o;
+	assign word_fifo_enqueue_valid = fetch_word_valid_i && !fault_o;
+	assign fetch_word_ready_o = word_fifo_enqueue_ready && !fault_o;
 	assign idle_o = (word_fifo_level_o == '0) && (context_fifo_level_o == '0) && scheduler_idle;
 
 	// Word FIFO absorbs iMEM latency and allows fetch to run ahead of the variable-rate Decoder.
-	lpu_queue_fifo #(
+	lpu_fifo #(
 		.DATA_WIDTH(97),
 		.DEPTH(WORD_FIFO_DEPTH)
 	) u_word_fifo (
@@ -88,7 +86,7 @@ module lpu_mem_macro_frontend #(
 		.rst_ni,
 		.enqueue_valid_i(word_fifo_enqueue_valid),
 		.enqueue_ready_o(word_fifo_enqueue_ready),
-		.enqueue_data_i({word_last_i, word_i}),
+		.enqueue_data_i({fetch_word_last_i, fetch_word_i}),
 		.dequeue_valid_o(word_fifo_valid),
 		.dequeue_ready_i(word_fifo_ready),
 		.dequeue_data_o(word_fifo_data),
@@ -127,7 +125,7 @@ module lpu_mem_macro_frontend #(
 		scheduler_inner_count, scheduler_start_cycle, scheduler_instruction} = context_fifo_output_data;
 
 	// Context FIFO decouples variable-length parsing from Active Context admission.
-	lpu_queue_fifo #(
+	lpu_fifo #(
 		.DATA_WIDTH(CONTEXT_WIDTH),
 		.DEPTH(CONTEXT_FIFO_DEPTH)
 	) u_context_fifo (
@@ -142,11 +140,9 @@ module lpu_mem_macro_frontend #(
 		.level_o(context_fifo_level_o)
 	);
 
-	// The Scheduler computes future base instructions; the downstream Instruction Queue owns storage.
+	// The Scheduler owns the final absolute Issue Cycle and drives MEM directly.
 	lpu_mem_macro_scheduler #(
-		.ACTIVE_CONTEXTS(ACTIVE_CONTEXTS),
-		.ISSUE_FIFO_DEPTH(ISSUE_FIFO_DEPTH),
-		.ISSUE_LOOKAHEAD(2)
+		.ACTIVE_CONTEXTS(ACTIVE_CONTEXTS)
 	) u_scheduler (
 		.clk_i,
 		.rst_ni,
@@ -165,12 +161,11 @@ module lpu_mem_macro_frontend #(
 		.context_outer_stride_i(scheduler_outer_stride),
 		.context_induction_target_i(scheduler_induction_target),
 		.context_address_i(scheduler_address),
-		.issue_valid_o,
-		.issue_ready_i,
-		.issue_instruction_o,
-		.issue_cycle_o,
+		.mem_issue_valid_o,
+		.mem_issue_ready_i,
+		.mem_issue_instruction_o,
+		.mem_issue_cycle_o,
 		.active_count_o,
-		.issue_fifo_level_o,
 		.idle_o(scheduler_idle),
 		.prime_ready_o,
 		.conflict_o(scheduler_conflict),

@@ -12,7 +12,8 @@ module lpu_program_load_controller #(
 	input logic [63:0] program_cmd_write_source_address_i,
 	input logic [31:0] program_cmd_write_byte_count_i,
 	input logic [1:0] program_cmd_write_scope_i,
-	input logic [11:0] program_cmd_write_destination_i,
+	input logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		program_cmd_write_destination_i,
 	input logic [1:0] program_cmd_write_format_i,
 	input logic [16:0] program_cmd_write_imem_base_address_i,
 	input logic program_cmd_write_image_first_i,
@@ -29,7 +30,8 @@ module lpu_program_load_controller #(
 	output logic [63:0] ctrl_load_txn_source_address_o,
 	output logic [31:0] ctrl_load_txn_byte_count_o,
 	output logic [1:0] ctrl_load_txn_scope_o,
-	output logic [11:0] ctrl_load_txn_destination_o,
+	output logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		ctrl_load_txn_destination_o,
 	output logic [1:0] ctrl_load_txn_format_o,
 	output logic [16:0] ctrl_load_txn_imem_base_address_o,
 	output logic ctrl_load_txn_image_first_o,
@@ -40,7 +42,8 @@ module lpu_program_load_controller #(
 	output logic ctrl_prime_valid_o,
 	input logic ctrl_prime_ready_i,
 	output logic [1:0] ctrl_prime_scope_o,
-	output logic [11:0] ctrl_prime_destination_o,
+	output logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		ctrl_prime_destination_o,
 
 	input logic load_pipeline_idle_i,
 
@@ -62,7 +65,7 @@ module lpu_program_load_controller #(
 	logic [63:0] active_source_address_w;
 	logic [31:0] active_byte_count_w;
 	logic [1:0] active_scope_w;
-	logic [11:0] active_destination_w;
+	logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0] active_destination_w;
 	logic [1:0] active_format_w;
 	logic [16:0] active_imem_base_address_w;
 	logic active_image_first_w;
@@ -85,9 +88,9 @@ module lpu_program_load_controller #(
 	logic ctrl_load_txn_fire;
 	logic ctrl_prime_fire;
 	logic active_complete_w;
-	logic active_invalid_w;
-	logic program_load_start_invalid_w;
-	logic jump_invalid_w;
+	logic active_command_illegal_w;
+	logic program_load_start_illegal_w;
+	logic jump_target_illegal_w;
 
 	initial begin
 		if(COMMAND_DEPTH < 1)begin
@@ -127,7 +130,7 @@ module lpu_program_load_controller #(
 	assign program_cmd_write_fire = program_cmd_write_valid_i && program_cmd_write_ready_o;
 	assign program_load_start_ready_o = !busy_q;
 	assign program_load_start_fire = program_load_start_valid_i && program_load_start_ready_o;
-	assign program_load_start_invalid_w = program_load_start_fire &&
+	assign program_load_start_illegal_w = program_load_start_fire &&
 		((program_load_start_command_count_i == '0) || (program_load_start_command_count_i > COMMAND_DEPTH));
 	assign fetch_command_w = busy_q && !active_valid_q &&
 		(command_pc_q < command_count_q);
@@ -152,23 +155,23 @@ module lpu_program_load_controller #(
 	assign ctrl_prime_scope_o = active_scope_w;
 	assign ctrl_prime_destination_o = active_destination_w;
 
-	assign jump_invalid_w = active_valid_q &&
+	assign jump_target_illegal_w = active_valid_q &&
 		(active_opcode_w == PROGRAM_LOADER_JUMP) &&
 		(active_jump_address_w >= command_count_q);
-	assign active_invalid_w = active_valid_q &&
-		((active_opcode_w > PROGRAM_LOADER_END) || jump_invalid_w);
+	assign active_command_illegal_w = active_valid_q &&
+		((active_opcode_w > PROGRAM_LOADER_END) || jump_target_illegal_w);
 	assign active_complete_w = active_valid_q && (
 		((active_opcode_w == PROGRAM_LOADER_LOAD_IMEM) && ctrl_load_txn_fire) ||
 		((active_opcode_w == PROGRAM_LOADER_WAIT_DMA) && load_pipeline_idle_i) ||
 		((active_opcode_w == PROGRAM_LOADER_COMMIT_QUEUE) && ctrl_prime_fire) ||
 		(active_opcode_w == PROGRAM_LOADER_NEXT) ||
-		((active_opcode_w == PROGRAM_LOADER_JUMP) && !jump_invalid_w) ||
+		((active_opcode_w == PROGRAM_LOADER_JUMP) && !jump_target_illegal_w) ||
 		(active_opcode_w == PROGRAM_LOADER_END));
 
 	assign command_pc_o = command_pc_q;
 	assign busy_o = busy_q;
 	assign done_o = done_q;
-	assign fault_o = fault_q || program_load_start_invalid_w || active_invalid_w ||
+	assign fault_o = fault_q || program_load_start_illegal_w || active_command_illegal_w ||
 		(busy_q && !active_valid_q && (command_pc_q >= command_count_q));
 	assign fault_code_o = fault_q ? fault_code_q :
 		(fault_o ? PROGRAM_FAULT_COMMAND : PROGRAM_FAULT_NONE);
@@ -207,7 +210,7 @@ module lpu_program_load_controller #(
 				command_pc_q <= '0;
 				command_count_q <= program_load_start_command_count_i;
 				active_valid_q <= 1'b0;
-				busy_q <= !program_load_start_invalid_w;
+				busy_q <= !program_load_start_illegal_w;
 				done_q <= 1'b0;
 				next_dma_id_q <= '0;
 			end
@@ -215,7 +218,7 @@ module lpu_program_load_controller #(
 				if(fetch_command_w)begin
 					active_valid_q <= 1'b1;
 				end
-				if(active_invalid_w ||
+				if(active_command_illegal_w ||
 					(!active_valid_q && (command_pc_q >= command_count_q)))begin
 					active_valid_q <= 1'b0;
 					busy_q <= 1'b0;
@@ -245,7 +248,7 @@ module lpu_program_load_controller #(
 			fault_code_q <= PROGRAM_FAULT_NONE;
 		end
 		else if(!fault_q)begin
-			if(program_load_start_invalid_w || active_invalid_w ||
+			if(program_load_start_illegal_w || active_command_illegal_w ||
 				(busy_q && !active_valid_q && (command_pc_q >= command_count_q)))begin
 				fault_q <= 1'b1;
 				fault_code_q <= PROGRAM_FAULT_COMMAND;

@@ -50,10 +50,10 @@ module lpu_vxm_macro_decoder #(
 
 	// Logical packet payload closes the four-bit subtype hole in word zero.
 	logic [259:0] payload_w;
-	logic header_invalid_w;
-	logic reserved_invalid_w;
-	logic schedule_invalid_w;
-	logic instruction_invalid_w;
+	logic header_illegal_w;
+	logic reserved_bits_illegal_w;
+	logic schedule_illegal_w;
+	logic instruction_illegal_w;
 	logic [16:0] inner_count_w;
 	logic [16:0] outer_count_w;
 	logic [23:0] inner_interval_w;
@@ -73,9 +73,9 @@ module lpu_vxm_macro_decoder #(
 	integer chain_length_w;
 	logic chain_head_w;
 	logic chain_tail_w;
-	logic opcode_position_invalid_w;
-	logic operand_position_invalid_w;
-	logic accumulator_invalid_w;
+	logic opcode_position_illegal_w;
+	logic operand_position_illegal_w;
+	logic accumulator_operand_illegal_w;
 	logic word_fire;
 	logic context_fire;
 
@@ -144,11 +144,11 @@ module lpu_vxm_macro_decoder #(
 	// Header, loop and current Compact-v1 checks mirror the CModel codec. The
 	// physical channel identifies LOCAL_QUEUE, so no Stage index is encoded.
 	always_comb begin
-		header_invalid_w = (packet_word_q[0][7:0] != 8'h43)
+		header_illegal_w = (packet_word_q[0][7:0] != 8'h43)
 			|| (packet_word_q[1][7:0] != 8'h47)
 			|| (packet_word_q[2][7:0] != 8'h4b)
 			|| (packet_word_q[0][91:88] != 4'd2);
-		reserved_invalid_w = |payload_w[259:200];
+		reserved_bits_illegal_w = |payload_w[259:200];
 
 		inner_count_w = {1'b0, payload_w[39:24]} + 17'd1;
 		outer_count_w = {1'b0, payload_w[55:40]} + 17'd1;
@@ -156,7 +156,7 @@ module lpu_vxm_macro_decoder #(
 		outer_interval_w = payload_w[103:80];
 		inner_cycle_span_w = payload_w[39:24] * inner_interval_w;
 		total_cycle_span_w = inner_cycle_span_w + payload_w[55:40] * outer_interval_w;
-		schedule_invalid_w = (inner_interval_w == 0) || (outer_interval_w == 0)
+		schedule_illegal_w = (inner_interval_w == 0) || (outer_interval_w == 0)
 			|| ((outer_count_w > 1) && (outer_interval_w <= inner_cycle_span_w))
 			|| (total_cycle_span_w >= 64'd16777216);
 
@@ -179,24 +179,24 @@ module lpu_vxm_macro_decoder #(
 				(chain_length_w-1));
 		end
 
-		opcode_position_invalid_w = ((opcode_w == 6) && ((LOCAL_QUEUE % 4) != 1)) ||
+		opcode_position_illegal_w = ((opcode_w == 6) && ((LOCAL_QUEUE % 4) != 1)) ||
 			(((opcode_w == 7) || (opcode_w == 8) || (opcode_w == 9)) &&
 			 ((LOCAL_QUEUE % 4) != 3));
-		operand_position_invalid_w = 1'b0;
+		operand_position_illegal_w = 1'b0;
 		if(chain_head_w)begin
-			operand_position_invalid_w =
+			operand_position_illegal_w =
 				(!(stream_operand(lhs_kind_w) || (lhs_kind_w == 6) ||
 				   (lhs_kind_w == 7))) ||
 				(!(stream_operand(rhs_kind_w) || (rhs_kind_w == 6)));
 		end
 		else begin
-			operand_position_invalid_w = (lhs_kind_w != 0) ||
+			operand_position_illegal_w = (lhs_kind_w != 0) ||
 				!((rhs_kind_w == 1) || (rhs_kind_w == 2) ||
 				  (rhs_kind_w == 6) ||
 				  (((LOCAL_QUEUE % 4) == 1 || (LOCAL_QUEUE % 4) == 3) &&
 				   (rhs_kind_w == 3)));
 		end
-		accumulator_invalid_w =
+		accumulator_operand_illegal_w =
 			(accumulator_reset_w && !accumulator_write_w) ||
 			(local_scalar_write_w && (accumulator_write_w ||
 			 ((LOCAL_QUEUE % 4) != 1 && (LOCAL_QUEUE % 4) != 3))) ||
@@ -206,11 +206,11 @@ module lpu_vxm_macro_decoder #(
 			(!accumulator_write_w && (rhs_kind_w == 3) &&
 			 ((LOCAL_QUEUE % 4) != 1 && (LOCAL_QUEUE % 4) != 3));
 
-		instruction_invalid_w = (opcode_w > 9) || (lhs_kind_w > 8) ||
+		instruction_illegal_w = (opcode_w > 9) || (lhs_kind_w > 8) ||
 			(rhs_kind_w > 8) || (chain_depth_w > 2) ||
 			(repeat_count_w == 0) || (|control_w[63:54]) ||
-			opcode_position_invalid_w || operand_position_invalid_w ||
-			accumulator_invalid_w || (output_enable_w && !chain_tail_w);
+			opcode_position_illegal_w || operand_position_illegal_w ||
+			accumulator_operand_illegal_w || (output_enable_w && !chain_tail_w);
 	end
 
 	// Word collection is independent from Context holding so output backpressure is lossless.
@@ -253,7 +253,7 @@ module lpu_vxm_macro_decoder #(
 		end
 		else begin
 			if(context_fire) context_valid_q <= 1'b0;
-			if(decode_pending_q && !header_invalid_w && !reserved_invalid_w && !schedule_invalid_w && !instruction_invalid_w)begin
+			if(decode_pending_q && !header_illegal_w && !reserved_bits_illegal_w && !schedule_illegal_w && !instruction_illegal_w)begin
 				context_valid_q <= 1'b1;
 				context_instruction_q <= {payload_w[199:168], payload_w[167:104]};
 				context_wait_cycle_q <= {8'd0, payload_w[23:0]};
@@ -279,19 +279,19 @@ module lpu_vxm_macro_decoder #(
 				fault_q <= 1'b1;
 				fault_code_q <= FAULT_TRUNCATED;
 			end
-			else if(decode_pending_q && header_invalid_w)begin
+			else if(decode_pending_q && header_illegal_w)begin
 				fault_q <= 1'b1;
 				fault_code_q <= FAULT_HEADER;
 			end
-			else if(decode_pending_q && reserved_invalid_w)begin
+			else if(decode_pending_q && reserved_bits_illegal_w)begin
 				fault_q <= 1'b1;
 				fault_code_q <= FAULT_RESERVED;
 			end
-			else if(decode_pending_q && schedule_invalid_w)begin
+			else if(decode_pending_q && schedule_illegal_w)begin
 				fault_q <= 1'b1;
 				fault_code_q <= FAULT_SCHEDULE;
 			end
-			else if(decode_pending_q && instruction_invalid_w)begin
+			else if(decode_pending_q && instruction_illegal_w)begin
 				fault_q <= 1'b1;
 				fault_code_q <= FAULT_INSTRUCTION;
 			end

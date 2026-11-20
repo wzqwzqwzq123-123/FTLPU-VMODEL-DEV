@@ -174,9 +174,9 @@ module lpu_mxm_macro_decoder_core #(
 	logic signed [31:0] decoded_outer_stride_w;
 	logic [1:0] decoded_target_w;
 	logic [63:0] decoded_inner_span_w;
-	logic decoded_native_invalid_w;
-	logic decoded_schedule_invalid_w;
-	logic delta_prefix_valid_w;
+	logic decoded_native_illegal_w;
+	logic decoded_schedule_illegal_w;
+	logic delta_prefix_recognized_w;
 	logic [2:0] delta_prefix_symbol_w;
 	logic [2:0] delta_prefix_width_w;
 	logic [32:0] delta_start_sum_w;
@@ -239,44 +239,44 @@ module lpu_mxm_macro_decoder_core #(
 	endfunction
 
 	// Native instruction checks reproduce the current CModel MXM decode rules.
-	function automatic logic load_native_invalid(input logic [48:0] native_instruction);
+	function automatic logic load_native_illegal(input logic [48:0] native_instruction);
 		logic [5:0] stream_base;
 		begin
-			load_native_invalid = 1'b0;
+			load_native_illegal = 1'b0;
 			stream_base = '0;
 			case(native_instruction[1:0])
 				2'd0: begin
 					stream_base = native_instruction[15:10];
 					if(!native_instruction[5] && native_instruction[8:6] != 3'd0)begin
-						load_native_invalid = 1'b1;
+						load_native_illegal = 1'b1;
 					end
 					if((!native_instruction[5] && !native_instruction[9] && stream_base > 6'd24) ||
 						(!native_instruction[5] && native_instruction[9] && stream_base > 6'd16) ||
 						(native_instruction[5] && !native_instruction[9] && stream_base > 6'd31) ||
 						(native_instruction[5] && native_instruction[9] && stream_base > 6'd30))begin
-						load_native_invalid = 1'b1;
+						load_native_illegal = 1'b1;
 					end
 				end
 				2'd3: begin
 					stream_base = native_instruction[9:4];
 					if(native_instruction[3] || |native_instruction[24:10] || |native_instruction[27:26])begin
-						load_native_invalid = 1'b1;
+						load_native_illegal = 1'b1;
 					end
 					if((!native_instruction[28] && stream_base > 6'd24) ||
 						(native_instruction[28] && stream_base > 6'd30))begin
-						load_native_invalid = 1'b1;
+						load_native_illegal = 1'b1;
 					end
 				end
-				default: load_native_invalid = 1'b1;
+				default: load_native_illegal = 1'b1;
 			endcase
 		end
 	endfunction
 
-	function automatic logic compute_native_invalid(input logic [48:0] native_instruction);
+	function automatic logic compute_native_illegal(input logic [48:0] native_instruction);
 		logic [5:0] stream_base;
 		logic [5:0] activation_stream_base;
 		begin
-			compute_native_invalid = 1'b0;
+			compute_native_illegal = 1'b0;
 			stream_base = native_instruction[14:9];
 			activation_stream_base = native_instruction[8:3];
 			case(native_instruction[1:0])
@@ -284,7 +284,7 @@ module lpu_mxm_macro_decoder_core #(
 					if(native_instruction[46] || activation_stream_base > 6'd30 ||
 						(!native_instruction[48] && stream_base > 6'd28) ||
 						(native_instruction[48] && stream_base > 6'd30))begin
-						compute_native_invalid = 1'b1;
+						compute_native_illegal = 1'b1;
 					end
 				end
 				2'd2: begin
@@ -292,17 +292,17 @@ module lpu_mxm_macro_decoder_core #(
 						{1'b0, native_instruction[27:15]} >= ACCUMULATOR_ROWS_LIMIT ||
 						(!native_instruction[48] && stream_base > 6'd28) ||
 						(native_instruction[48] && stream_base > 6'd30))begin
-						compute_native_invalid = 1'b1;
+						compute_native_illegal = 1'b1;
 					end
 				end
 				2'd3: begin
 					if(!native_instruction[3] || |native_instruction[48:29] ||
 						{1'b0, native_instruction[22:10]} >= ACCUMULATOR_ROWS_LIMIT ||
 						(native_instruction[26] && native_instruction[9:4] > 6'd30))begin
-						compute_native_invalid = 1'b1;
+						compute_native_illegal = 1'b1;
 					end
 				end
-				default: compute_native_invalid = 1'b1;
+				default: compute_native_illegal = 1'b1;
 			endcase
 		end
 	endfunction
@@ -389,56 +389,56 @@ module lpu_mxm_macro_decoder_core #(
 
 		decoded_inner_span_w = {32'd0, decoded_inner_count_w - 32'd1} * {32'd0, decoded_inner_interval_w};
 		case(QUEUE_KIND)
-			QUEUE_LOAD: decoded_native_invalid_w = load_native_invalid(template_native_q);
-			QUEUE_COMPUTE: decoded_native_invalid_w = compute_native_invalid(template_native_q);
-			default: decoded_native_invalid_w = 1'b0;
+			QUEUE_LOAD: decoded_native_illegal_w = load_native_illegal(template_native_q);
+			QUEUE_COMPUTE: decoded_native_illegal_w = compute_native_illegal(template_native_q);
+			default: decoded_native_illegal_w = 1'b0;
 		endcase
-		decoded_schedule_invalid_w = (decoded_inner_count_w == 32'd0) || (decoded_inner_interval_w == 32'd0) ||
+		decoded_schedule_illegal_w = (decoded_inner_count_w == 32'd0) || (decoded_inner_interval_w == 32'd0) ||
 			(decoded_outer_count_w == 32'd0) || (decoded_outer_interval_w == 32'd0) ||
 			((decoded_outer_count_w > 32'd1) && ({32'd0, decoded_outer_interval_w} <= decoded_inner_span_w));
 		if(QUEUE_KIND == QUEUE_LOAD)begin
 			if(template_native_q[1:0] == 2'd3)begin
-				decoded_schedule_invalid_w = decoded_schedule_invalid_w || decoded_target_w != TARGET_NONE ||
+				decoded_schedule_illegal_w = decoded_schedule_illegal_w || decoded_target_w != TARGET_NONE ||
 					decoded_inner_stride_w != 32'sd0 || decoded_outer_stride_w != 32'sd0;
 			end
 			else begin
-				decoded_schedule_invalid_w = decoded_schedule_invalid_w ||
+				decoded_schedule_illegal_w = decoded_schedule_illegal_w ||
 					(decoded_target_w != TARGET_NONE && decoded_target_w != TARGET_WEIGHT_COLUMN);
 			end
 		end
 		else if(QUEUE_KIND == QUEUE_COMPUTE)begin
-			decoded_schedule_invalid_w = decoded_schedule_invalid_w ||
+			decoded_schedule_illegal_w = decoded_schedule_illegal_w ||
 				(decoded_target_w != TARGET_NONE && decoded_target_w != TARGET_ACCUMULATOR_ADDRESS);
 		end
 		else begin
-			decoded_schedule_invalid_w = decoded_schedule_invalid_w || decoded_target_w != TARGET_NONE ||
+			decoded_schedule_illegal_w = decoded_schedule_illegal_w || decoded_target_w != TARGET_NONE ||
 				decoded_inner_stride_w != 32'sd0 || decoded_outer_stride_w != 32'sd0;
 		end
 	end
 
 	// Delta symbols use a variable-length LSB-first prefix. Symbol seven selects Escape.
 	always_comb begin
-		delta_prefix_valid_w = 1'b0;
+		delta_prefix_recognized_w = 1'b0;
 		delta_prefix_symbol_w = 3'd0;
 		delta_prefix_width_w = 3'd0;
 
 		if(reservoir_bits_q >= 9'd1 && !reservoir_q[0])begin
-			delta_prefix_valid_w = 1'b1;
+			delta_prefix_recognized_w = 1'b1;
 			delta_prefix_symbol_w = 3'd0;
 			delta_prefix_width_w = 3'd1;
 		end
 		else if(reservoir_bits_q >= 9'd2 && !reservoir_q[1])begin
-			delta_prefix_valid_w = 1'b1;
+			delta_prefix_recognized_w = 1'b1;
 			delta_prefix_symbol_w = 3'd1;
 			delta_prefix_width_w = 3'd2;
 		end
 		else if(reservoir_bits_q >= 9'd4 && !reservoir_q[2])begin
-			delta_prefix_valid_w = 1'b1;
+			delta_prefix_recognized_w = 1'b1;
 			delta_prefix_symbol_w = reservoir_q[3] ? 3'd3 : 3'd2;
 			delta_prefix_width_w = 3'd4;
 		end
 		else if(reservoir_bits_q >= 9'd5 && reservoir_q[2])begin
-			delta_prefix_valid_w = 1'b1;
+			delta_prefix_recognized_w = 1'b1;
 			if(!reservoir_q[3])begin
 				delta_prefix_symbol_w = reservoir_q[4] ? 3'd5 : 3'd4;
 			end
@@ -632,12 +632,12 @@ module lpu_mxm_macro_decoder_core #(
 				end
 
 				STATE_TEMPLATE_DECODE: begin
-					if(decoded_native_invalid_w)begin
+					if(decoded_native_illegal_w)begin
 						set_fault = 1'b1;
 						fault_code_d = FAULT_NATIVE;
 						state_d = STATE_FAULT;
 					end
-					else if(decoded_schedule_invalid_w)begin
+					else if(decoded_schedule_illegal_w)begin
 						set_fault = 1'b1;
 						fault_code_d = FAULT_SCHEDULE;
 						state_d = STATE_FAULT;
@@ -656,7 +656,7 @@ module lpu_mxm_macro_decoder_core #(
 
 				// Dictionary/Escape Delta reconstruction and output backpressure.
 				STATE_DELTA_PREFIX: begin
-					if(delta_prefix_valid_w)begin
+					if(delta_prefix_recognized_w)begin
 						if(delta_prefix_symbol_w < dictionary_count_q)begin
 							consume_bits = 1'b1;
 							consume_width = {6'd0, delta_prefix_width_w};

@@ -49,8 +49,8 @@ module lpu_instruction_dma #(
 	localparam integer DMA_KEEP_WIDTH = DMA_DATA_WIDTH / 8;
 	localparam integer RESPONSE_WIDTH = DMA_DATA_WIDTH + DMA_KEEP_WIDTH + DMA_ID_WIDTH + 2;
 
-	logic command_fire;
-	logic response_input_fire;
+	logic ctrl_dma_cmd_fire;
+	logic ddr_read_rsp_fire;
 	logic outstanding_enqueue_ready;
 	logic outstanding_dequeue_valid;
 	logic outstanding_dequeue_ready;
@@ -61,7 +61,7 @@ module lpu_instruction_dma #(
 	logic [RESPONSE_WIDTH-1:0] response_enqueue_data;
 	logic [RESPONSE_WIDTH-1:0] response_dequeue_data;
 	logic [$clog2(RX_FIFO_DEPTH+1)-1:0] response_level;
-	logic response_id_invalid_w;
+	logic response_id_mismatch_w;
 	logic response_error_w;
 	logic fault_q;
 	logic [5:0] fault_code_q;
@@ -78,7 +78,7 @@ module lpu_instruction_dma #(
 	assign ddr_read_req_length_o = ctrl_dma_cmd_length_i;
 	assign ddr_read_req_id_o = ctrl_dma_cmd_id_i;
 	assign ctrl_dma_cmd_ready_o = ddr_read_req_ready_i && outstanding_enqueue_ready && !fault_q;
-	assign command_fire = ctrl_dma_cmd_valid_i && ctrl_dma_cmd_ready_o;
+	assign ctrl_dma_cmd_fire = ctrl_dma_cmd_valid_i && ctrl_dma_cmd_ready_o;
 
 	assign response_enqueue_data = {
 		ddr_read_rsp_error_i,
@@ -88,8 +88,8 @@ module lpu_instruction_dma #(
 		ddr_read_rsp_data_i
 	};
 	assign ddr_read_rsp_ready_o = response_enqueue_ready && !fault_q;
-	assign response_input_fire = ddr_read_rsp_valid_i && ddr_read_rsp_ready_o;
-	assign outstanding_dequeue_ready = response_input_fire && ddr_read_rsp_last_i;
+	assign ddr_read_rsp_fire = ddr_read_rsp_valid_i && ddr_read_rsp_ready_o;
+	assign outstanding_dequeue_ready = ddr_read_rsp_fire && ddr_read_rsp_last_i;
 
 	assign {
 		reasm_rsp_error_o,
@@ -99,23 +99,23 @@ module lpu_instruction_dma #(
 		reasm_rsp_data_o
 	} = response_dequeue_data;
 
-	assign response_id_invalid_w = response_input_fire &&
+	assign response_id_mismatch_w = ddr_read_rsp_fire &&
 		(!outstanding_dequeue_valid || (ddr_read_rsp_id_i != outstanding_head_id));
-	assign response_error_w = response_input_fire && ddr_read_rsp_error_i;
+	assign response_error_w = ddr_read_rsp_fire && ddr_read_rsp_error_i;
 	assign outstanding_o = outstanding_level;
 	assign idle_o = (outstanding_level == '0) && (response_level == '0);
-	assign fault_o = fault_q || response_id_invalid_w || response_error_w;
+	assign fault_o = fault_q || response_id_mismatch_w || response_error_w;
 	assign fault_code_o = fault_q ? fault_code_q :
-		(response_id_invalid_w ? PROGRAM_FAULT_DMA_ID :
+		(response_id_mismatch_w ? PROGRAM_FAULT_DMA_ID :
 		(response_error_w ? PROGRAM_FAULT_DMA_RESPONSE : PROGRAM_FAULT_NONE));
 
-	lpu_queue_fifo #(
+	lpu_fifo #(
 		.DATA_WIDTH(DMA_ID_WIDTH),
 		.DEPTH(OUTSTANDING_DEPTH)
 	) u_outstanding_id_fifo (
 		.clk_i,
 		.rst_ni,
-		.enqueue_valid_i(command_fire),
+		.enqueue_valid_i(ctrl_dma_cmd_fire),
 		.enqueue_ready_o(outstanding_enqueue_ready),
 		.enqueue_data_i(ctrl_dma_cmd_id_i),
 		.dequeue_valid_o(outstanding_dequeue_valid),
@@ -124,7 +124,7 @@ module lpu_instruction_dma #(
 		.level_o(outstanding_level)
 	);
 
-	lpu_queue_fifo #(
+	lpu_fifo #(
 		.DATA_WIDTH(RESPONSE_WIDTH),
 		.DEPTH(RX_FIFO_DEPTH)
 	) u_response_fifo (
@@ -146,7 +146,7 @@ module lpu_instruction_dma #(
 			fault_code_q <= PROGRAM_FAULT_NONE;
 		end
 		else if(!fault_q)begin
-			if(response_id_invalid_w)begin
+			if(response_id_mismatch_w)begin
 				fault_q <= 1'b1;
 				fault_code_q <= PROGRAM_FAULT_DMA_ID;
 			end

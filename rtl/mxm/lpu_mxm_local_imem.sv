@@ -32,12 +32,16 @@ module lpu_mxm_local_imem #(
 	localparam integer OUTSTANDING_WIDTH = $clog2(RESPONSE_DEPTH + 1);
 	localparam integer RESPONSE_WIDTH = WORD_WIDTH + 1;
 
-	logic [WORD_WIDTH-1:0] data_mem_q [0:DEPTH-1];
 	logic request_stage_valid_q;
-	logic [ADDRESS_WIDTH-1:0] request_stage_address_q;
 	logic request_stage_last_q;
 	logic response_stage_valid_q;
 	logic [RESPONSE_WIDTH-1:0] response_stage_data_q;
+	logic sram_cen;
+	logic sram_wen;
+	logic [ADDRESS_WIDTH-1:0] sram_address;
+	logic [WORD_WIDTH-1:0] sram_wdata;
+	logic sram_read_valid;
+	logic [WORD_WIDTH-1:0] sram_read_data;
 	logic [OUTSTANDING_WIDTH-1:0] outstanding_q;
 	logic [RESPONSE_WIDTH-1:0] response_fifo_data;
 	logic response_fifo_ready;
@@ -69,11 +73,30 @@ module lpu_mxm_local_imem #(
 	assign request_ready_o = !load_mode_i && !fault_q &&
 		((outstanding_q < RESPONSE_DEPTH) || response_fire);
 	assign request_fire = request_valid_i && request_ready_o;
+	assign sram_cen = load_fire || request_fire;
+	assign sram_wen = load_fire;
+	assign sram_address = load_fire ? load_address_i : request_address_i;
+	assign sram_wdata = load_data_i;
 	assign protocol_fault_w = (response_stage_valid_q && !response_fifo_ready) ||
 		(load_mode_i && (outstanding_q != '0));
 	assign fault_o = fault_q || protocol_fault_w;
 
-	lpu_queue_fifo #(
+	lpu_sram #(
+		.DATA_WIDTH(WORD_WIDTH),
+		.DEPTH(DEPTH),
+		.ADDRESS_WIDTH(ADDRESS_WIDTH)
+	) u_storage (
+		.clk_i,
+		.rst_ni,
+		.cen_i(sram_cen),
+		.wen_i(sram_wen),
+		.address_i(sram_address),
+		.wdata_i(sram_wdata),
+		.rvalid_o(sram_read_valid),
+		.rdata_o(sram_read_data)
+	);
+
+	lpu_fifo #(
 		.DATA_WIDTH(RESPONSE_WIDTH),
 		.DEPTH(RESPONSE_DEPTH)
 	) u_response_fifo (
@@ -88,18 +111,10 @@ module lpu_mxm_local_imem #(
 		.level_o(response_fifo_level)
 	);
 
-	// Program state resets do not clear SRAM contents; a new descriptor limits visibility.
-	always_ff @(posedge clk_i) begin
-		if(rst_ni && load_fire)begin
-			data_mem_q[load_address_i] <= load_data_i;
-		end
-	end
-
-	// Address registration and data capture model a replaceable synchronous SRAM macro.
+	// Preserve the two-stage local-iMEM response pipeline around the synchronous SRAM read.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			request_stage_valid_q <= 1'b0;
-			request_stage_address_q <= '0;
 			request_stage_last_q <= 1'b0;
 			response_stage_valid_q <= 1'b0;
 			response_stage_data_q <= '0;
@@ -107,12 +122,11 @@ module lpu_mxm_local_imem #(
 		else begin
 			request_stage_valid_q <= request_fire;
 			if(request_fire)begin
-				request_stage_address_q <= request_address_i;
 				request_stage_last_q <= request_last_i;
 			end
-			response_stage_valid_q <= request_stage_valid_q;
-			if(request_stage_valid_q)begin
-				response_stage_data_q <= {request_stage_last_q, data_mem_q[request_stage_address_q]};
+			response_stage_valid_q <= sram_read_valid;
+			if(sram_read_valid)begin
+				response_stage_data_q <= {request_stage_last_q, sram_read_data};
 			end
 		end
 	end

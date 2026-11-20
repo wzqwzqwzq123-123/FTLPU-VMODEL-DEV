@@ -53,9 +53,9 @@ module lpu_mxm_local_imem_frontend #(
 	logic [ADDRESS_WIDTH:0] next_load_address_q;
 	logic [WORD_COUNT_WIDTH-1:0] load_word_count_q;
 	logic load_fire;
-	logic load_invalid_w;
+	logic load_record_illegal_w;
 	logic prime_fire;
-	logic prime_invalid_w;
+	logic prime_request_illegal_w;
 	logic fault_q;
 	logic [5:0] fault_code_q;
 
@@ -102,12 +102,12 @@ module lpu_mxm_local_imem_frontend #(
 	assign configured_o = configured_q;
 	assign load_ready_o = !prime_started_q && imem_load_ready && !fault_q;
 	assign load_fire = load_valid_i && load_ready_o;
-	assign load_invalid_w = load_fire && ((load_strb_i != 4'b1111) ||
+	assign load_record_illegal_w = load_fire && ((load_strb_i != 4'b1111) ||
 		(load_address_i >= IMEM_DEPTH) || load_last_seen_q ||
 		(configured_q && (load_address_i != next_load_address_q)));
 	assign prime_ready_o = !prime_started_q && imem_idle && !fault_q;
 	assign prime_fire = prime_valid_i && prime_ready_o;
-	assign prime_invalid_w = prime_fire && (!configured_q || !load_last_seen_q ||
+	assign prime_request_illegal_w = prime_fire && (!configured_q || !load_last_seen_q ||
 		(load_word_count_q == '0));
 	assign frontend_ready_o = !configured_q || (prime_started_q && fetch_complete_q &&
 		decoder_done && scheduler_prime_ready && !fault_o);
@@ -127,7 +127,7 @@ module lpu_mxm_local_imem_frontend #(
 		.clk_i,
 		.rst_ni(queue_rst_ni),
 		.load_mode_i(!prime_started_q),
-		.load_valid_i(load_valid_i && load_ready_o && !load_invalid_w),
+		.load_valid_i(load_valid_i && load_ready_o && !load_record_illegal_w),
 		.load_ready_o(imem_load_ready),
 		.load_address_i(load_address_i[ADDRESS_WIDTH-1:0]),
 		.load_data_i,
@@ -253,7 +253,7 @@ module lpu_mxm_local_imem_frontend #(
 			fetch_complete_q <= 1'b0;
 		end
 		else begin
-			if(load_fire && !load_invalid_w)begin
+			if(load_fire && !load_record_illegal_w)begin
 				if(!configured_q)begin
 					configured_q <= 1'b1;
 					load_base_q <= load_address_i[ADDRESS_WIDTH-1:0];
@@ -264,7 +264,7 @@ module lpu_mxm_local_imem_frontend #(
 					load_last_seen_q <= 1'b1;
 				end
 			end
-			if(prime_fire && !prime_invalid_w)begin
+			if(prime_fire && !prime_request_illegal_w)begin
 				prime_started_q <= 1'b1;
 			end
 			if(prime_started_q && !fetch_started_q && fetch_start_ready)begin
@@ -283,11 +283,11 @@ module lpu_mxm_local_imem_frontend #(
 			fault_code_q <= FAULT_NONE;
 		end
 		else if(!fault_q)begin
-			if(load_invalid_w)begin
+			if(load_record_illegal_w)begin
 				fault_q <= 1'b1;
 				fault_code_q <= FAULT_LOAD;
 			end
-			else if(prime_invalid_w)begin
+			else if(prime_request_illegal_w)begin
 				fault_q <= 1'b1;
 				fault_code_q <= FAULT_PRIME;
 			end

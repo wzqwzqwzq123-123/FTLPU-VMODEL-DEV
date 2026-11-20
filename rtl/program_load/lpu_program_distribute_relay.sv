@@ -26,7 +26,8 @@ module lpu_program_distribute_relay #(
 	input logic [127:0] chain_record_data_i,
 	input logic [3:0] chain_record_strb_i,
 	input logic [1:0] chain_record_scope_i,
-	input logic [11:0] chain_record_destination_i,
+	input logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		chain_record_destination_i,
 	input logic [16:0] chain_record_imem_address_i,
 	input logic chain_record_last_i,
 
@@ -36,7 +37,8 @@ module lpu_program_distribute_relay #(
 	output logic [127:0] local_endpoint_data_o,
 	output logic [3:0] local_endpoint_strb_o,
 	output logic [1:0] local_endpoint_scope_o,
-	output logic [11:0] local_endpoint_destination_o,
+	output logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		local_endpoint_destination_o,
 	output logic [16:0] local_endpoint_imem_address_o,
 	output logic local_endpoint_last_o,
 
@@ -46,7 +48,8 @@ module lpu_program_distribute_relay #(
 	output logic [127:0] next_relay_data_o,
 	output logic [3:0] next_relay_strb_o,
 	output logic [1:0] next_relay_scope_o,
-	output logic [11:0] next_relay_destination_o,
+	output logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		next_relay_destination_o,
 	output logic [16:0] next_relay_imem_address_o,
 	output logic next_relay_last_o,
 
@@ -57,7 +60,8 @@ module lpu_program_distribute_relay #(
 );
 	import lpu_program_load_pkg::*;
 
-	localparam integer RECORD_WIDTH = PROGRAM_LOAD_CONTROL_WIDTH + 164;
+	localparam integer RECORD_WIDTH = PROGRAM_LOAD_CONTROL_WIDTH + 128 + 4 + 2 +
+		PROGRAM_DESTINATION_WIDTH + 17 + 1;
 	localparam integer PTR_WIDTH = (BUFFER_DEPTH <= 1) ? 1 : $clog2(BUFFER_DEPTH);
 	localparam integer LEVEL_WIDTH = $clog2(BUFFER_DEPTH + 1);
 	localparam integer MEM_BANK_COUNT = MEM_SLICES_PER_HEMISPHERE * BANKS_PER_SLICE;
@@ -77,21 +81,21 @@ module lpu_program_distribute_relay #(
 	logic [127:0] head_data_w;
 	logic [3:0] head_strb_w;
 	logic [1:0] head_scope_w;
-	logic [11:0] head_destination_w;
+	logic [PROGRAM_DESTINATION_WIDTH-1:0] head_destination_w;
 	logic [16:0] head_imem_address_w;
 	logic head_last_w;
 	logic [2:0] head_target_kind_w;
 	logic [7:0] head_target_index_w;
 	logic [7:0] local_endpoint_bank_offset_w;
 
-	logic scope_invalid_w;
+	logic scope_illegal_w;
 	logic scope_mismatch_w;
 	logic hemisphere_mismatch_w;
 	logic local_endpoint_route_w;
 	logic next_relay_mem_w;
 	logic next_relay_peripheral_w;
 	logic next_relay_route_w;
-	logic route_invalid_w;
+	logic route_illegal_w;
 	logic enqueue_fire_w;
 	logic local_endpoint_fire_w;
 	logic next_relay_fire_w;
@@ -154,7 +158,7 @@ module lpu_program_distribute_relay #(
 	assign local_endpoint_bank_offset_w = head_target_index_w - LOCAL_BANK_BASE;
 
 	// A concrete Hemisphere chain accepts BOTH as metadata but never duplicates the Record locally.
-	assign scope_invalid_w = (head_scope_w != PROGRAM_SCOPE_EAST) &&
+	assign scope_illegal_w = (head_scope_w != PROGRAM_SCOPE_EAST) &&
 		(head_scope_w != PROGRAM_SCOPE_WEST) && (head_scope_w != PROGRAM_SCOPE_BOTH);
 	assign scope_mismatch_w = ((head_scope_w == PROGRAM_SCOPE_EAST) &&
 		(RELAY_HEMISPHERE != PROGRAM_HEMISPHERE_EAST)) ||
@@ -172,25 +176,25 @@ module lpu_program_distribute_relay #(
 		(head_target_kind_w == PROGRAM_TARGET_SXM_TRANSPOSE) ||
 		(head_target_kind_w == PROGRAM_TARGET_SXM_PERMUTE);
 	assign next_relay_route_w = !LAST_RELAY && (next_relay_mem_w || next_relay_peripheral_w);
-	assign route_invalid_w = head_valid_w && (scope_invalid_w || scope_mismatch_w ||
+	assign route_illegal_w = head_valid_w && (scope_illegal_w || scope_mismatch_w ||
 		hemisphere_mismatch_w || (!local_endpoint_route_w && !next_relay_route_w));
 
 	// Ready depends only on registered occupancy and local route validity, cutting downstream Ready chains.
-	assign chain_record_ready_o = !fault_q && !route_invalid_w && (level_q < BUFFER_DEPTH);
+	assign chain_record_ready_o = !fault_q && !route_illegal_w && (level_q < BUFFER_DEPTH);
 	assign enqueue_fire_w = chain_record_valid_i && chain_record_ready_o;
 
 	// Present the buffered head record only to the decoded local endpoint bank.
 	always_comb begin
 		local_endpoint_valid_o = '0;
-		if(head_valid_w && local_endpoint_route_w && !route_invalid_w && !fault_q)begin
+		if(head_valid_w && local_endpoint_route_w && !route_illegal_w && !fault_q)begin
 			local_endpoint_valid_o[local_endpoint_bank_offset_w] = 1'b1;
 		end
 	end
 
 	assign local_endpoint_fire_w = |(local_endpoint_valid_o & local_endpoint_ready_i);
-	assign next_relay_valid_o = head_valid_w && next_relay_route_w && !route_invalid_w && !fault_q;
+	assign next_relay_valid_o = head_valid_w && next_relay_route_w && !route_illegal_w && !fault_q;
 	assign next_relay_fire_w = next_relay_valid_o && next_relay_ready_i;
-	assign dequeue_fire_w = local_endpoint_fire_w || next_relay_fire_w || route_invalid_w;
+	assign dequeue_fire_w = local_endpoint_fire_w || next_relay_fire_w || route_illegal_w;
 
 	assign local_endpoint_control_o = head_control_w;
 	assign local_endpoint_data_o = head_data_w;
@@ -210,7 +214,7 @@ module lpu_program_distribute_relay #(
 
 	assign level_o = level_q;
 	assign idle_o = level_q == 0;
-	assign fault_o = fault_q || route_invalid_w;
+	assign fault_o = fault_q || route_illegal_w;
 	assign fault_code_o = fault_o ? PROGRAM_FAULT_ROUTE : PROGRAM_FAULT_NONE;
 
 	// Record storage is written independently from pointer and occupancy updates.
@@ -258,7 +262,7 @@ module lpu_program_distribute_relay #(
 			fault_q <= 1'b0;
 		end
 		else begin
-			if(route_invalid_w)begin
+			if(route_illegal_w)begin
 				fault_q <= 1'b1;
 			end
 		end

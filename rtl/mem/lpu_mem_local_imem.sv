@@ -7,7 +7,7 @@ module lpu_mem_local_imem #(
 	input logic clk_i,
 	input logic rst_ni,
 
-	// Program loading owns the single SRAM port until this Queue is primed.
+	// Program loading owns the single SRAM port until this Frontend is primed.
 	input  logic                      load_mode_i,
 	input  logic                      load_valid_i,
 	output logic                      load_ready_o,
@@ -15,15 +15,15 @@ module lpu_mem_local_imem #(
 	input  logic [WORD_WIDTH-1:0]     load_data_i,
 
 	// Fetch requests are in order, have a two-cycle SRAM latency and II=1.
-	input  logic                      request_valid_i,
-	output logic                      request_ready_o,
-	input  logic [ADDRESS_WIDTH-1:0]  request_address_i,
-	input  logic                      request_last_i,
+	input  logic                      imem_read_req_valid_i,
+	output logic                      imem_read_req_ready_o,
+	input  logic [ADDRESS_WIDTH-1:0]  imem_read_req_address_i,
+	input  logic                      imem_read_req_last_i,
 
-	output logic                      response_valid_o,
-	input  logic                      response_ready_i,
-	output logic [WORD_WIDTH-1:0]     response_data_o,
-	output logic                      response_last_o,
+	output logic                      imem_read_rsp_valid_o,
+	input  logic                      imem_read_rsp_ready_i,
+	output logic [WORD_WIDTH-1:0]     imem_read_rsp_data_o,
+	output logic                      imem_read_rsp_last_o,
 
 	output logic [$clog2(RESPONSE_DEPTH+1)-1:0] outstanding_o,
 	output logic                      idle_o,
@@ -32,19 +32,23 @@ module lpu_mem_local_imem #(
 	localparam integer OUTSTANDING_WIDTH = $clog2(RESPONSE_DEPTH + 1);
 	localparam integer RESPONSE_WIDTH = WORD_WIDTH + 1;
 
-	logic [WORD_WIDTH-1:0] data_mem_q [0:DEPTH-1];
 	logic request_stage_valid_q;
-	logic [ADDRESS_WIDTH-1:0] request_stage_address_q;
 	logic request_stage_last_q;
 	logic response_stage_valid_q;
 	logic [RESPONSE_WIDTH-1:0] response_stage_data_q;
+	logic sram_cen;
+	logic sram_wen;
+	logic [ADDRESS_WIDTH-1:0] sram_address;
+	logic [WORD_WIDTH-1:0] sram_wdata;
+	logic sram_read_valid;
+	logic [WORD_WIDTH-1:0] sram_read_data;
 	logic [OUTSTANDING_WIDTH-1:0] outstanding_q;
 	logic [RESPONSE_WIDTH-1:0] response_fifo_data;
 	logic response_fifo_ready;
 	logic [$clog2(RESPONSE_DEPTH+1)-1:0] response_fifo_level;
 	logic load_fire;
-	logic request_fire;
-	logic response_fire;
+	logic imem_read_req_fire;
+	logic imem_read_rsp_fire;
 	logic protocol_fault_w;
 	logic fault_q;
 
@@ -57,23 +61,42 @@ module lpu_mem_local_imem #(
 		end
 	end
 
-	assign response_valid_o = response_fifo_level != '0;
-	assign response_data_o = response_fifo_data[WORD_WIDTH-1:0];
-	assign response_last_o = response_fifo_data[WORD_WIDTH];
-	assign response_fire = response_valid_o && response_ready_i;
+	assign imem_read_rsp_valid_o = response_fifo_level != '0;
+	assign imem_read_rsp_data_o = response_fifo_data[WORD_WIDTH-1:0];
+	assign imem_read_rsp_last_o = response_fifo_data[WORD_WIDTH];
+	assign imem_read_rsp_fire = imem_read_rsp_valid_o && imem_read_rsp_ready_i;
 	assign outstanding_o = outstanding_q;
 	assign idle_o = (outstanding_q == '0) && !request_stage_valid_q && !response_stage_valid_q;
 
 	assign load_ready_o = load_mode_i && idle_o && !fault_q;
 	assign load_fire = load_valid_i && load_ready_o;
-	assign request_ready_o = !load_mode_i && !fault_q &&
-		((outstanding_q < RESPONSE_DEPTH) || response_fire);
-	assign request_fire = request_valid_i && request_ready_o;
+	assign imem_read_req_ready_o = !load_mode_i && !fault_q &&
+		((outstanding_q < RESPONSE_DEPTH) || imem_read_rsp_fire);
+	assign imem_read_req_fire = imem_read_req_valid_i && imem_read_req_ready_o;
+	assign sram_cen = load_fire || imem_read_req_fire;
+	assign sram_wen = load_fire;
+	assign sram_address = load_fire ? load_address_i : imem_read_req_address_i;
+	assign sram_wdata = load_data_i;
 	assign protocol_fault_w = (response_stage_valid_q && !response_fifo_ready) ||
 		(load_mode_i && (outstanding_q != '0));
 	assign fault_o = fault_q || protocol_fault_w;
 
-	lpu_queue_fifo #(
+	lpu_sram #(
+		.DATA_WIDTH(WORD_WIDTH),
+		.DEPTH(DEPTH),
+		.ADDRESS_WIDTH(ADDRESS_WIDTH)
+	) u_storage (
+		.clk_i,
+		.rst_ni,
+		.cen_i(sram_cen),
+		.wen_i(sram_wen),
+		.address_i(sram_address),
+		.wdata_i(sram_wdata),
+		.rvalid_o(sram_read_valid),
+		.rdata_o(sram_read_data)
+	);
+
+	lpu_fifo #(
 		.DATA_WIDTH(RESPONSE_WIDTH),
 		.DEPTH(RESPONSE_DEPTH)
 	) u_response_fifo (
@@ -83,36 +106,27 @@ module lpu_mem_local_imem #(
 		.enqueue_ready_o(response_fifo_ready),
 		.enqueue_data_i(response_stage_data_q),
 		.dequeue_valid_o(),
-		.dequeue_ready_i(response_ready_i),
+		.dequeue_ready_i(imem_read_rsp_ready_i),
 		.dequeue_data_o(response_fifo_data),
 		.level_o(response_fifo_level)
 	);
 
-	// Program state resets do not clear SRAM contents; a new descriptor limits visibility.
-	always_ff @(posedge clk_i) begin
-		if(rst_ni && load_fire)begin
-			data_mem_q[load_address_i] <= load_data_i;
-		end
-	end
-
-	// Address registration and data capture model a replaceable synchronous SRAM macro.
+	// Preserve the two-stage local-iMEM response pipeline around the synchronous SRAM read.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			request_stage_valid_q <= 1'b0;
-			request_stage_address_q <= '0;
 			request_stage_last_q <= 1'b0;
 			response_stage_valid_q <= 1'b0;
 			response_stage_data_q <= '0;
 		end
 		else begin
-			request_stage_valid_q <= request_fire;
-			if(request_fire)begin
-				request_stage_address_q <= request_address_i;
-				request_stage_last_q <= request_last_i;
+			request_stage_valid_q <= imem_read_req_fire;
+			if(imem_read_req_fire)begin
+				request_stage_last_q <= imem_read_req_last_i;
 			end
-			response_stage_valid_q <= request_stage_valid_q;
-			if(request_stage_valid_q)begin
-				response_stage_data_q <= {request_stage_last_q, data_mem_q[request_stage_address_q]};
+			response_stage_valid_q <= sram_read_valid;
+			if(sram_read_valid)begin
+				response_stage_data_q <= {request_stage_last_q, sram_read_data};
 			end
 		end
 	end
@@ -123,7 +137,7 @@ module lpu_mem_local_imem #(
 			outstanding_q <= '0;
 		end
 		else begin
-			case({request_fire, response_fire})
+			case({imem_read_req_fire, imem_read_rsp_fire})
 				2'b10: outstanding_q <= outstanding_q + 1'b1;
 				2'b01: outstanding_q <= outstanding_q - 1'b1;
 				default: outstanding_q <= outstanding_q;

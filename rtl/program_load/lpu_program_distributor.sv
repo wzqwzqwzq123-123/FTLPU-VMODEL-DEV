@@ -10,7 +10,8 @@ module lpu_program_distributor #(
 	input logic [127:0] load_record_data_i,
 	input logic [3:0] load_record_strb_i,
 	input logic [1:0] load_record_scope_i,
-	input logic [11:0] load_record_destination_i,
+	input logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		load_record_destination_i,
 	input logic [16:0] load_record_imem_address_i,
 	input logic load_record_last_i,
 
@@ -19,7 +20,8 @@ module lpu_program_distributor #(
 	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] west_relay_control_o,
 	output logic [127:0] west_relay_data_o,
 	output logic [3:0] west_relay_strb_o,
-	output logic [11:0] west_relay_destination_o,
+	output logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		west_relay_destination_o,
 	output logic [16:0] west_relay_imem_address_o,
 	output logic west_relay_last_o,
 
@@ -28,7 +30,8 @@ module lpu_program_distributor #(
 	output logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] east_relay_control_o,
 	output logic [127:0] east_relay_data_o,
 	output logic [3:0] east_relay_strb_o,
-	output logic [11:0] east_relay_destination_o,
+	output logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		east_relay_destination_o,
 	output logic [16:0] east_relay_imem_address_o,
 	output logic east_relay_last_o,
 
@@ -44,7 +47,7 @@ module lpu_program_distributor #(
 	logic [127:0] head_data;
 	logic [3:0] head_strb;
 	logic [1:0] head_scope;
-	logic [11:0] head_destination;
+	logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0] head_destination;
 	logic [16:0] head_imem_address;
 	logic head_last;
 	logic elastic_idle;
@@ -59,9 +62,9 @@ module lpu_program_distributor #(
 	logic east_relay_fire;
 	logic west_relay_complete_w;
 	logic east_relay_complete_w;
-	logic scope_invalid_w;
+	logic scope_illegal_w;
 	logic scope_mismatch_w;
-	logic route_invalid_w;
+	logic route_illegal_w;
 	logic fault_q;
 
 	lpu_program_distribute_elastic_stage #(
@@ -100,13 +103,13 @@ module lpu_program_distributor #(
 		(head_scope == PROGRAM_SCOPE_BOTH));
 	assign east_relay_required_w = vxm_target_w || (head_scope == PROGRAM_SCOPE_EAST) ||
 		(head_scope == PROGRAM_SCOPE_BOTH);
-	assign scope_invalid_w = (head_scope != PROGRAM_SCOPE_EAST) &&
+	assign scope_illegal_w = (head_scope != PROGRAM_SCOPE_EAST) &&
 		(head_scope != PROGRAM_SCOPE_WEST) && (head_scope != PROGRAM_SCOPE_BOTH);
 	assign scope_mismatch_w = ((!vxm_target_w && (head_scope == PROGRAM_SCOPE_EAST)) &&
 		(head_destination[PROGRAM_DESTINATION_HEMISPHERE_BIT] != PROGRAM_HEMISPHERE_EAST)) ||
 		((!vxm_target_w && (head_scope == PROGRAM_SCOPE_WEST)) &&
 		 (head_destination[PROGRAM_DESTINATION_HEMISPHERE_BIT] != PROGRAM_HEMISPHERE_WEST));
-	assign route_invalid_w = head_valid && (scope_invalid_w || scope_mismatch_w);
+	assign route_illegal_w = head_valid && (scope_illegal_w || scope_mismatch_w);
 
 	assign west_relay_valid_o = head_valid && west_relay_required_w && !west_relay_done_q && !fault_q;
 	assign east_relay_valid_o = head_valid && east_relay_required_w && !east_relay_done_q && !fault_q;
@@ -114,7 +117,7 @@ module lpu_program_distributor #(
 	assign east_relay_fire = east_relay_valid_o && east_relay_ready_i;
 	assign west_relay_complete_w = !west_relay_required_w || west_relay_done_q || west_relay_fire;
 	assign east_relay_complete_w = !east_relay_required_w || east_relay_done_q || east_relay_fire;
-	assign head_ready = head_valid && (route_invalid_w ||
+	assign head_ready = head_valid && (route_illegal_w ||
 		(west_relay_complete_w && east_relay_complete_w && !fault_q));
 
 	assign west_relay_control_o = head_control;
@@ -134,7 +137,7 @@ module lpu_program_distributor #(
 	assign east_relay_last_o = head_last;
 
 	assign idle_o = elastic_idle && !west_relay_done_q && !east_relay_done_q;
-	assign fault_o = fault_q || route_invalid_w;
+	assign fault_o = fault_q || route_illegal_w;
 	assign fault_code_o = fault_o ? PROGRAM_FAULT_ROUTE : PROGRAM_FAULT_NONE;
 
 	// West and East are independent ready/valid branches; a BOTH command is retired after both handshakes.
@@ -164,7 +167,7 @@ module lpu_program_distributor #(
 		if(!rst_ni)begin
 			fault_q <= 1'b0;
 		end
-		else if(route_invalid_w)begin
+		else if(route_illegal_w)begin
 			fault_q <= 1'b1;
 		end
 	end

@@ -19,7 +19,8 @@ module lpu_program_load_path #(
 	input logic [63:0] ctrl_load_txn_source_address_i,
 	input logic [31:0] ctrl_load_txn_byte_count_i,
 	input logic [1:0] ctrl_load_txn_scope_i,
-	input logic [11:0] ctrl_load_txn_destination_i,
+	input logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		ctrl_load_txn_destination_i,
 	input logic [1:0] ctrl_load_txn_format_i,
 	input logic [16:0] ctrl_load_txn_imem_base_address_i,
 	input logic ctrl_load_txn_image_first_i,
@@ -45,7 +46,8 @@ module lpu_program_load_path #(
 	output logic [127:0] load_word_data_o,
 	output logic [3:0] load_word_strb_o,
 	output logic [1:0] load_word_scope_o,
-	output logic [11:0] load_word_destination_o,
+	output logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		load_word_destination_o,
 	output logic [16:0] load_word_imem_address_o,
 	output logic load_word_last_o,
 
@@ -63,7 +65,7 @@ module lpu_program_load_path #(
 	logic config_dequeue_ready;
 	logic [31:0] config_byte_count;
 	logic [1:0] config_scope;
-	logic [11:0] config_destination;
+	logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0] config_destination;
 	logic [1:0] config_format;
 	logic [16:0] config_imem_base_address;
 	logic config_image_first;
@@ -90,7 +92,8 @@ module lpu_program_load_path #(
 	logic [127:0] word_fifo_enqueue_data;
 	logic [3:0] word_fifo_enqueue_strb;
 	logic [1:0] word_fifo_enqueue_scope;
-	logic [11:0] word_fifo_enqueue_destination;
+	logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		word_fifo_enqueue_destination;
 	logic [16:0] word_fifo_enqueue_imem_address;
 	logic word_fifo_enqueue_last;
 	logic reassembler_idle;

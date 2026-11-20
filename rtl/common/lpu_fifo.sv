@@ -1,4 +1,4 @@
-module lpu_queue_fifo #(
+module lpu_fifo #(
 	parameter integer DATA_WIDTH = 1,
 	parameter integer DEPTH = 16
 ) (

@@ -9,7 +9,8 @@ module lpu_program_load_config_fifo #(
 	input logic [63:0] enqueue_source_address_i,
 	input logic [31:0] enqueue_byte_count_i,
 	input logic [1:0] enqueue_scope_i,
-	input logic [11:0] enqueue_destination_i,
+	input logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		enqueue_destination_i,
 	input logic [1:0] enqueue_format_i,
 	input logic [16:0] enqueue_imem_base_address_i,
 	input logic enqueue_image_first_i,
@@ -22,7 +23,8 @@ module lpu_program_load_config_fifo #(
 	output logic [63:0] dequeue_source_address_o,
 	output logic [31:0] dequeue_byte_count_o,
 	output logic [1:0] dequeue_scope_o,
-	output logic [11:0] dequeue_destination_o,
+	output logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		dequeue_destination_o,
 	output logic [1:0] dequeue_format_o,
 	output logic [16:0] dequeue_imem_base_address_o,
 	output logic dequeue_image_first_o,
@@ -69,7 +71,7 @@ module lpu_program_load_config_fifo #(
 	assign empty_o = level_o == '0;
 	assign full_o = level_o == DEPTH;
 
-	lpu_queue_fifo #(
+	lpu_fifo #(
 		.DATA_WIDTH(CONFIG_WIDTH),
 		.DEPTH(DEPTH)
 	) u_config_fifo (

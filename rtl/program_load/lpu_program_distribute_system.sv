@@ -11,7 +11,8 @@ module lpu_program_distribute_system (
 	input logic [127:0] load_distribute_data_i,
 	input logic [3:0] load_distribute_strb_i,
 	input logic [1:0] load_distribute_scope_i,
-	input logic [11:0] load_distribute_destination_i,
+	input logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		load_distribute_destination_i,
 	input logic [16:0] load_distribute_imem_address_i,
 	input logic load_distribute_last_i,
 
@@ -19,10 +20,11 @@ module lpu_program_distribute_system (
 	input logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_ready_i,
 	output logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*
 		lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] mem_program_control_o,
-	output logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*12-1:0]
+	output logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*
+		lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
 		mem_program_destination_o,
 	output logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*17-1:0]
-		mem_program_address_o,
+		mem_program_imem_address_o,
 	output logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*128-1:0]
 		mem_program_data_o,
 	output logic [lpu_program_load_pkg::PROGRAM_RELAY_PORT_COUNT*4-1:0] mem_program_strb_o,
@@ -36,7 +38,8 @@ module lpu_program_distribute_system (
 	input logic [1:0] sxm_program_ready_i,
 	input logic [1:0] sxm_program_error_i,
 	output logic [2*lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] outer_program_control_o,
-	output logic [23:0] outer_program_destination_o,
+	output logic [2*lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		outer_program_destination_o,
 	output logic [33:0] outer_program_address_o,
 	output logic [255:0] outer_program_data_o,
 	output logic [7:0] outer_program_strb_o,
@@ -85,7 +88,7 @@ module lpu_program_distribute_system (
 	logic [2*PROGRAM_LOAD_CONTROL_WIDTH-1:0] endpoint_load_control;
 	logic [255:0] endpoint_load_data;
 	logic [7:0] endpoint_load_strb;
-	logic [23:0] endpoint_load_destination;
+	logic [2*PROGRAM_DESTINATION_WIDTH-1:0] endpoint_load_destination;
 	logic [33:0] endpoint_load_imem_address;
 	logic [1:0] endpoint_load_last;
 
@@ -93,8 +96,8 @@ module lpu_program_distribute_system (
 	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_ready;
 	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_error;
 	logic [PROGRAM_RELAY_PORT_COUNT*PROGRAM_LOAD_CONTROL_WIDTH-1:0] mem_program_control;
-	logic [PROGRAM_RELAY_PORT_COUNT*12-1:0] mem_program_destination;
-	logic [PROGRAM_RELAY_PORT_COUNT*17-1:0] mem_program_address;
+	logic [PROGRAM_RELAY_PORT_COUNT*PROGRAM_DESTINATION_WIDTH-1:0] mem_program_destination;
+	logic [PROGRAM_RELAY_PORT_COUNT*17-1:0] mem_program_imem_address;
 	logic [PROGRAM_RELAY_PORT_COUNT*128-1:0] mem_program_data;
 	logic [PROGRAM_RELAY_PORT_COUNT*4-1:0] mem_program_strb;
 	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_program_last;
@@ -102,7 +105,7 @@ module lpu_program_distribute_system (
 	logic [3:0] mxm_program_ready;
 	logic [3:0] mxm_program_error;
 	logic [2*PROGRAM_LOAD_CONTROL_WIDTH-1:0] outer_program_control;
-	logic [23:0] outer_program_destination;
+	logic [2*PROGRAM_DESTINATION_WIDTH-1:0] outer_program_destination;
 	logic [33:0] outer_program_address;
 	logic [255:0] outer_program_data;
 	logic [7:0] outer_program_strb;
@@ -128,8 +131,8 @@ module lpu_program_distribute_system (
 	logic [2*PROGRAM_RELAY_COUNT*128-1:0] relay_mem_data;
 	logic [2*PROGRAM_RELAY_COUNT*4-1:0] relay_mem_strb;
 	logic [2*PROGRAM_RELAY_COUNT*2-1:0] relay_mem_scope;
-	logic [2*PROGRAM_RELAY_COUNT*12-1:0] relay_mem_destination;
-	logic [2*PROGRAM_RELAY_COUNT*17-1:0] relay_mem_address;
+	logic [2*PROGRAM_RELAY_COUNT*PROGRAM_DESTINATION_WIDTH-1:0] relay_mem_destination;
+	logic [2*PROGRAM_RELAY_COUNT*17-1:0] relay_mem_imem_address;
 	logic [2*PROGRAM_RELAY_COUNT-1:0] relay_mem_last;
 	logic [1:0] relay_outer_valid;
 	logic [1:0] relay_outer_ready;
@@ -165,7 +168,7 @@ module lpu_program_distribute_system (
 	assign mem_program_valid_o = mem_program_valid;
 	assign mem_program_control_o = mem_program_control;
 	assign mem_program_destination_o = mem_program_destination;
-	assign mem_program_address_o = mem_program_address;
+	assign mem_program_imem_address_o = mem_program_imem_address;
 	assign mem_program_data_o = mem_program_data;
 	assign mem_program_strb_o = mem_program_strb;
 	assign mem_program_last_o = mem_program_last;
@@ -208,7 +211,8 @@ module lpu_program_distribute_system (
 		.west_relay_control_o(endpoint_load_control[PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH]),
 		.west_relay_data_o(endpoint_load_data[128+:128]),
 		.west_relay_strb_o(endpoint_load_strb[4+:4]),
-		.west_relay_destination_o(endpoint_load_destination[12+:12]),
+		.west_relay_destination_o(endpoint_load_destination[
+			PROGRAM_DESTINATION_WIDTH+:PROGRAM_DESTINATION_WIDTH]),
 		.west_relay_imem_address_o(endpoint_load_imem_address[17+:17]),
 		.west_relay_last_o(endpoint_load_last[1]),
 		.east_relay_valid_o(endpoint_load_valid[0]),
@@ -216,7 +220,7 @@ module lpu_program_distribute_system (
 		.east_relay_control_o(endpoint_load_control[0+:PROGRAM_LOAD_CONTROL_WIDTH]),
 		.east_relay_data_o(endpoint_load_data[0+:128]),
 		.east_relay_strb_o(endpoint_load_strb[0+:4]),
-		.east_relay_destination_o(endpoint_load_destination[0+:12]),
+		.east_relay_destination_o(endpoint_load_destination[0+:PROGRAM_DESTINATION_WIDTH]),
 		.east_relay_imem_address_o(endpoint_load_imem_address[0+:17]),
 		.east_relay_last_o(endpoint_load_last[0]),
 		.idle_o(distributor_idle),
@@ -264,7 +268,8 @@ module lpu_program_distribute_system (
 				.distributor_record_data_i(endpoint_load_data[chain_gen*128+:128]),
 				.distributor_record_strb_i(endpoint_load_strb[chain_gen*4+:4]),
 				.distributor_record_scope_i(chain_gen == 0 ? PROGRAM_SCOPE_EAST : PROGRAM_SCOPE_WEST),
-				.distributor_record_destination_i(endpoint_load_destination[chain_gen*12+:12]),
+				.distributor_record_destination_i(endpoint_load_destination[
+					chain_gen*PROGRAM_DESTINATION_WIDTH+:PROGRAM_DESTINATION_WIDTH]),
 				.distributor_record_imem_address_i(endpoint_load_imem_address[chain_gen*17+:17]),
 				.distributor_record_last_i(endpoint_load_last[chain_gen]),
 				.mem_endpoint_valid_o(relay_mem_valid[
@@ -283,8 +288,9 @@ module lpu_program_distribute_system (
 				.mem_endpoint_scope_o(relay_mem_scope[
 					chain_gen*PROGRAM_RELAY_COUNT*2+:PROGRAM_RELAY_COUNT*2]),
 				.mem_endpoint_destination_o(relay_mem_destination[
-					chain_gen*PROGRAM_RELAY_COUNT*12+:PROGRAM_RELAY_COUNT*12]),
-				.mem_endpoint_imem_address_o(relay_mem_address[
+					chain_gen*PROGRAM_RELAY_COUNT*PROGRAM_DESTINATION_WIDTH+:
+					PROGRAM_RELAY_COUNT*PROGRAM_DESTINATION_WIDTH]),
+				.mem_endpoint_imem_address_o(relay_mem_imem_address[
 					chain_gen*PROGRAM_RELAY_COUNT*17+:PROGRAM_RELAY_COUNT*17]),
 				.mem_endpoint_last_o(relay_mem_last[
 					chain_gen*PROGRAM_RELAY_COUNT+:PROGRAM_RELAY_COUNT]),
@@ -295,7 +301,8 @@ module lpu_program_distribute_system (
 				.outer_endpoint_data_o(relay_outer_data[chain_gen*128+:128]),
 				.outer_endpoint_strb_o(relay_outer_strb[chain_gen*4+:4]),
 				.outer_endpoint_scope_o(relay_outer_scope[chain_gen*2+:2]),
-				.outer_endpoint_destination_o(relay_outer_destination[chain_gen*12+:12]),
+				.outer_endpoint_destination_o(relay_outer_destination[
+					chain_gen*PROGRAM_DESTINATION_WIDTH+:PROGRAM_DESTINATION_WIDTH]),
 				.outer_endpoint_imem_address_o(relay_outer_address[chain_gen*17+:17]),
 				.outer_endpoint_last_o(relay_outer_last[chain_gen]),
 				.relay_level_o(),
@@ -400,9 +407,11 @@ module lpu_program_distribute_system (
 				assign mem_program_control[PORT_INDEX*PROGRAM_LOAD_CONTROL_WIDTH+:
 					PROGRAM_LOAD_CONTROL_WIDTH] = relay_mem_control[
 					PORT_INDEX*PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH];
-				assign mem_program_destination[PORT_INDEX*12+:12] =
-					relay_mem_destination[PORT_INDEX*12+:12];
-				assign mem_program_address[PORT_INDEX*17+:17] = relay_mem_address[PORT_INDEX*17+:17];
+				assign mem_program_destination[PORT_INDEX*PROGRAM_DESTINATION_WIDTH+:
+					PROGRAM_DESTINATION_WIDTH] = relay_mem_destination[
+					PORT_INDEX*PROGRAM_DESTINATION_WIDTH+:PROGRAM_DESTINATION_WIDTH];
+				assign mem_program_imem_address[PORT_INDEX*17+:17] =
+					relay_mem_imem_address[PORT_INDEX*17+:17];
 				assign mem_program_data[PORT_INDEX*128+:128] = relay_mem_data[PORT_INDEX*128+:128];
 				assign mem_program_strb[PORT_INDEX*4+:4] = relay_mem_strb[PORT_INDEX*4+:4];
 				assign mem_program_last[PORT_INDEX] = relay_mem_last[PORT_INDEX];
@@ -460,8 +469,9 @@ module lpu_program_distribute_system (
 			assign outer_program_control[outer_gen*PROGRAM_LOAD_CONTROL_WIDTH+:
 				PROGRAM_LOAD_CONTROL_WIDTH] = relay_outer_control[
 				outer_gen*PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH];
-			assign outer_program_destination[outer_gen*12+:12] =
-				relay_outer_destination[outer_gen*12+:12];
+			assign outer_program_destination[outer_gen*PROGRAM_DESTINATION_WIDTH+:
+				PROGRAM_DESTINATION_WIDTH] = relay_outer_destination[
+				outer_gen*PROGRAM_DESTINATION_WIDTH+:PROGRAM_DESTINATION_WIDTH];
 			assign outer_program_address[outer_gen*17+:17] = relay_outer_address[outer_gen*17+:17];
 			assign outer_program_data[outer_gen*128+:128] = relay_outer_data[outer_gen*128+:128];
 			assign outer_program_strb[outer_gen*4+:4] = relay_outer_strb[outer_gen*4+:4];

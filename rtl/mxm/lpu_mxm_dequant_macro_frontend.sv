@@ -80,7 +80,7 @@ module lpu_mxm_dequant_macro_frontend #(
 	assign idle_o = (word_fifo_level_o == '0) && (context_fifo_level_o == '0) && scheduler_idle;
 
 	// The FIFO is physically 128 bits; legacy 96-bit sources occupy the low bits.
-	lpu_queue_fifo #(
+	lpu_fifo #(
 		.DATA_WIDTH(129),
 		.DEPTH(WORD_FIFO_DEPTH)
 	) u_word_fifo (
@@ -132,7 +132,7 @@ module lpu_mxm_dequant_macro_frontend #(
 	assign decoder_context_ready = context_fifo_enqueue_ready && !fault_o;
 
 	// Context FIFO absorbs variable Decoder latency and Active-slot admission latency.
-	lpu_queue_fifo #(
+	lpu_fifo #(
 		.DATA_WIDTH(CONTEXT_WIDTH),
 		.DEPTH(CONTEXT_FIFO_DEPTH)
 	) u_context_fifo (

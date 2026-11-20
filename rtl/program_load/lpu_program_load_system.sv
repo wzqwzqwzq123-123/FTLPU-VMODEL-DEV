@@ -19,7 +19,8 @@ module lpu_program_load_system #(
 	input logic [2:0] program_cmd_write_opcode_i,
 	input logic [63:0] program_cmd_write_source_address_i,
 	input logic [31:0] program_cmd_write_byte_count_i,
-	input logic [11:0] program_cmd_write_destination_i,
+	input logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		program_cmd_write_destination_i,
 	input logic [1:0] program_cmd_write_format_i,
 	input logic [1:0] program_cmd_write_encoding_mode_i,
 	input logic [16:0] program_cmd_write_imem_base_address_i,
@@ -64,7 +65,8 @@ module lpu_program_load_system #(
 	output logic [127:0] load_distribute_data_o,
 	output logic [3:0] load_distribute_strb_o,
 	output logic [1:0] load_distribute_scope_o,
-	output logic [11:0] load_distribute_destination_o,
+	output logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		load_distribute_destination_o,
 	output logic [16:0] load_distribute_imem_address_o,
 	output logic load_distribute_last_o,
 	input logic load_distribute_idle_i,
@@ -123,7 +125,7 @@ module lpu_program_load_system #(
 	logic [63:0] ctrl_load_txn_source_address;
 	logic [31:0] ctrl_load_txn_byte_count;
 	logic [1:0] ctrl_load_txn_scope;
-	logic [11:0] ctrl_load_txn_destination;
+	logic [PROGRAM_DESTINATION_WIDTH-1:0] ctrl_load_txn_destination;
 	logic [1:0] ctrl_load_txn_format;
 	logic [16:0] ctrl_load_txn_imem_base_address;
 	logic ctrl_load_txn_image_first;
@@ -133,7 +135,7 @@ module lpu_program_load_system #(
 	logic ctrl_prime_valid;
 	logic ctrl_prime_ready;
 	logic [1:0] ctrl_prime_scope;
-	logic [11:0] ctrl_prime_destination;
+	logic [PROGRAM_DESTINATION_WIDTH-1:0] ctrl_prime_destination;
 	logic command_done;
 	logic command_fault;
 	logic [5:0] command_fault_code;
@@ -144,7 +146,7 @@ module lpu_program_load_system #(
 	logic [127:0] load_word_data;
 	logic [3:0] load_word_strb;
 	logic [1:0] load_word_scope;
-	logic [11:0] load_word_destination;
+	logic [PROGRAM_DESTINATION_WIDTH-1:0] load_word_destination;
 	logic [16:0] load_word_imem_address;
 	logic load_word_last;
 	logic load_path_idle;
@@ -160,7 +162,7 @@ module lpu_program_load_system #(
 	logic prime_dequeue_ready;
 	logic [13:0] prime_dequeue_data;
 	logic [1:0] prime_dequeue_scope;
-	logic [11:0] prime_dequeue_destination;
+	logic [PROGRAM_DESTINATION_WIDTH-1:0] prime_dequeue_destination;
 	logic [$clog2(32+1)-1:0] prime_fifo_level;
 	logic prime_select_w;
 
@@ -375,7 +377,7 @@ module lpu_program_load_system #(
 	assign ctrl_prime_ready = prime_enqueue_valid && prime_enqueue_ready;
 	assign prime_enqueue_data = {ctrl_prime_scope, ctrl_prime_destination};
 
-	lpu_queue_fifo #(
+	lpu_fifo #(
 		.DATA_WIDTH(14),
 		.DEPTH(32)
 	) u_prime_fifo (

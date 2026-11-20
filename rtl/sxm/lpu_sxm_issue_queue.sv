@@ -58,7 +58,7 @@ module lpu_sxm_issue_queue #(
 		(head_cycle == schedule_cycle_i) && !issue_ready_i;
 	assign fault_o = fault_q || enqueue_deadline_fault_w || late_fault_w || deadline_fault_w;
 
-	lpu_queue_fifo #(
+	lpu_fifo #(
 		.DATA_WIDTH(ENTRY_WIDTH),
 		.DEPTH(DEPTH)
 	) u_storage (

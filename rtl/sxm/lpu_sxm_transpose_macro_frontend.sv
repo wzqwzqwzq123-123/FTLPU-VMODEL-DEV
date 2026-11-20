@@ -92,7 +92,7 @@ module lpu_sxm_transpose_macro_frontend #(
 		end
 	end
 
-	lpu_queue_fifo #(
+	lpu_fifo #(
 		.DATA_WIDTH(97),
 		.DEPTH(WORD_FIFO_DEPTH)
 	) u_word_fifo (
@@ -135,7 +135,7 @@ module lpu_sxm_transpose_macro_frontend #(
 		scheduler_instruction} = context_fifo_output_data;
 	assign decoder_context_ready = context_fifo_enqueue_ready && !fault_o;
 
-	lpu_queue_fifo #(
+	lpu_fifo #(
 		.DATA_WIDTH(CONTEXT_WIDTH),
 		.DEPTH(CONTEXT_FIFO_DEPTH)
 	) u_context_fifo (

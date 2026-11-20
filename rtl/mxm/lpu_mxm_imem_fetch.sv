@@ -49,12 +49,12 @@ module lpu_mxm_imem_fetch #(
 	logic request_fire;
 	logic response_fire;
 	logic [ADDRESS_WIDTH:0] descriptor_end_w;
-	logic descriptor_invalid_w;
-	logic response_invalid_w;
+	logic descriptor_illegal_w;
+	logic response_protocol_error_w;
 
 	assign descriptor_end_w = {1'b0, start_base_address_i} + start_word_count_i;
-	assign descriptor_invalid_w = (start_word_count_i == '0) || (descriptor_end_w > IMEM_DEPTH);
-	assign response_invalid_w = response_fire && (!busy_q ||
+	assign descriptor_illegal_w = (start_word_count_i == '0) || (descriptor_end_w > IMEM_DEPTH);
+	assign response_protocol_error_w = response_fire && (!busy_q ||
 		(response_last_i != (responses_remaining_q == 1)));
 
 	assign start_ready_o = !busy_q && !fault_q;
@@ -72,10 +72,10 @@ module lpu_mxm_imem_fetch #(
 
 	assign busy_o = busy_q;
 	assign done_o = done_q;
-	assign fault_o = fault_q || (start_fire && descriptor_invalid_w) || response_invalid_w;
+	assign fault_o = fault_q || (start_fire && descriptor_illegal_w) || response_protocol_error_w;
 	assign fault_code_o = fault_q ? fault_code_q :
-		((start_fire && descriptor_invalid_w) ? FAULT_DESCRIPTOR :
-		(response_invalid_w ? FAULT_RESPONSE : FAULT_NONE));
+		((start_fire && descriptor_illegal_w) ? FAULT_DESCRIPTOR :
+		(response_protocol_error_w ? FAULT_RESPONSE : FAULT_NONE));
 
 	// Descriptor state is independent from Decoder backpressure; responses remain buffered in iMEM.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
@@ -88,7 +88,7 @@ module lpu_mxm_imem_fetch #(
 		end
 		else begin
 			done_q <= 1'b0;
-			if(start_fire && !descriptor_invalid_w)begin
+			if(start_fire && !descriptor_illegal_w)begin
 				busy_q <= 1'b1;
 				next_address_q <= start_base_address_i;
 				requests_remaining_q <= start_word_count_i;
@@ -116,11 +116,11 @@ module lpu_mxm_imem_fetch #(
 		end
 		else begin
 			if(!fault_q)begin
-				if(start_fire && descriptor_invalid_w)begin
+				if(start_fire && descriptor_illegal_w)begin
 					fault_q <= 1'b1;
 					fault_code_q <= FAULT_DESCRIPTOR;
 				end
-				else if(response_invalid_w)begin
+				else if(response_protocol_error_w)begin
 					fault_q <= 1'b1;
 					fault_code_q <= FAULT_RESPONSE;
 				end

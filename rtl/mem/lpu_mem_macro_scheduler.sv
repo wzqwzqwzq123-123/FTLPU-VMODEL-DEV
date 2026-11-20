@@ -1,8 +1,5 @@
 module lpu_mem_macro_scheduler #(
-	parameter integer ACTIVE_CONTEXTS = 4,
-	// Kept for interface compatibility. The Scheduler no longer owns an Issue FIFO.
-	parameter integer ISSUE_FIFO_DEPTH = 4,
-	parameter integer ISSUE_LOOKAHEAD = 2
+	parameter integer ACTIVE_CONTEXTS = 4
 ) (
 	input  logic        clk_i,
 	input  logic        rst_ni,
@@ -24,15 +21,14 @@ module lpu_mem_macro_scheduler #(
 	input  logic [1:0]  context_induction_target_i,
 	input  logic [12:0] context_address_i,
 
-	// Look-ahead output is accepted directly by the FU-local Instruction Queue.
-	output logic        issue_valid_o,
-	input  logic        issue_ready_i,
-	output logic [lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] issue_instruction_o,
-	output logic [31:0] issue_cycle_o,
+	// The due instruction is presented directly to the MEM execution boundary.
+	output logic        mem_issue_valid_o,
+	input  logic        mem_issue_ready_i,
+	output logic [lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] mem_issue_instruction_o,
+	output logic [31:0] mem_issue_cycle_o,
 
 	// Production observability and terminal status.
 	output logic [$clog2(ACTIVE_CONTEXTS+1)-1:0] active_count_o,
-	output logic [$clog2(ISSUE_FIFO_DEPTH+1)-1:0] issue_fifo_level_o,
 	output logic        idle_o,
 	output logic        prime_ready_o,
 	output logic        conflict_o,
@@ -57,9 +53,8 @@ module lpu_mem_macro_scheduler #(
 	localparam logic [3:0] FAULT_MISSED_ISSUE = 4'd8;
 	localparam logic [3:0] FAULT_CONFLICT = 4'd9;
 	localparam logic [3:0] FAULT_COUNTER_OVERFLOW = 4'd10;
-	localparam logic [3:0] FAULT_TIMED_QUEUE_BACKPRESSURE = 4'd11;
+	localparam logic [3:0] FAULT_ISSUE_BACKPRESSURE = 4'd11;
 	localparam logic [3:0] FAULT_TIMEBASE = 4'd13;
-	localparam logic [3:0] FAULT_LOOKAHEAD = 4'd14;
 
 	// Active Context storage contains only state needed after admission-time conversion.
 	logic active_valid_q [0:ACTIVE_CONTEXTS-1];
@@ -112,27 +107,27 @@ module lpu_mem_macro_scheduler #(
 	logic [3:0] context_fault_code_w;
 	logic [32:0] context_min_start_cycle_w;
 
-	// Lookahead compare and selected Active Context.
-	logic [32:0] lookahead_cycle_sum_w;
-	logic [31:0] lookahead_cycle_w;
-	logic lookahead_overflow_w;
-	// High when the due scan finds at least one Active Context for the current look-ahead cycle.
+	// Current-cycle compare and selected Active Context.
+	logic [31:0] mem_issue_cycle_w;
+	// High when the due scan finds at least one Active Context for the current Schedule Cycle.
 	logic selected_context_found_w;
 	integer selected_index_w;
 	integer due_count_w;
-	// High when any Active Context deadline is earlier than the look-ahead cycle, making on-time generation impossible.
+	// High when any Active Context deadline is earlier than the current Schedule Cycle.
 	logic missed_generation_w;
-	// High when exactly one generated instruction is accepted by the FU-local Instruction Queue without a fault.
+	// High when exactly one due instruction is accepted by the MEM execution boundary without a fault.
 	logic schedule_select_fire;
-	// High after queue acceptance when inner iterations remain; advances address, count and next issue cycle once.
+	// High after Issue acceptance when inner iterations remain; advances address, count and next issue cycle once.
 	logic active_context_inner_advance_w;
-	// High after queue acceptance on the last inner iteration while outer rows remain; starts the next row once.
+	// High after Issue acceptance on the last inner iteration while outer rows remain; starts the next row once.
 	logic active_context_outer_advance_w;
-	// High after queue acceptance on the final inner and outer iteration; releases the selected Active Context slot.
+	// High after Issue acceptance on the final inner and outer iteration; releases the selected Active Context slot.
 	logic active_context_retire_w;
 
-	// Instruction Queue handoff. Backpressure at the look-ahead cycle is terminal.
-	logic instruction_queue_blocked_w;
+	// Backpressure at the absolute Issue Cycle is terminal; timed work is never retried late.
+	logic mem_issue_blocked_w;
+	// High when a fault known before Issue transfer must suppress the current instruction.
+	logic issue_precondition_fault_w;
 	// Fault arbitration is explicit so the first hardware contract violation is retained.
 	logic timebase_violation_w;
 	// High when fault arbitration finds an input or runtime contract violation; blocks transfers and latches terminal fault state.
@@ -144,12 +139,6 @@ module lpu_mem_macro_scheduler #(
 	initial begin
 		if(ACTIVE_CONTEXTS < 1)begin
 			$error("ACTIVE_CONTEXTS must be at least one");
-		end
-		if(ISSUE_FIFO_DEPTH < 1)begin
-			$error("ISSUE_FIFO_DEPTH must be at least one");
-		end
-		if(ISSUE_LOOKAHEAD < 2)begin
-			$error("ISSUE_LOOKAHEAD must cover Instruction Queue write and deadline Issue stages");
 		end
 	end
 
@@ -177,11 +166,9 @@ module lpu_mem_macro_scheduler #(
 		end
 	endfunction
 
-	// Compatibility status: zero confirms that no base instruction is retained inside the Scheduler.
-	assign issue_fifo_level_o = '0;
 	// Unconnected legacy instances are treated as non-priming until their wrappers are migrated.
 	assign prime_mode_w = (prime_i === 1'b1) && !run_i;
-	assign scheduler_active_w = run_i || prime_mode_w;
+	assign scheduler_active_w = run_i;
 	assign conflict_o = fault_q ? (fault_code_q == FAULT_CONFLICT) : (scheduler_active_w && due_count_w > 1);
 	assign idle_o = active_count_o == '0;
 
@@ -249,9 +236,9 @@ module lpu_mem_macro_scheduler #(
 			(schedule_outer_spatial_transition_w < MIN_CONTEXT_STEP) || (schedule_outer_spatial_transition_w > MAX_CONTEXT_STEP);
 	end
 
-	// Check that a runtime Context arrives early enough for admission, selection and queue insertion.
+	// A runtime Context admitted on this edge becomes selectable on the next Schedule Cycle.
 	always_comb begin
-		context_min_start_cycle_w = {1'b0, schedule_cycle_i} + ISSUE_LOOKAHEAD + 1;
+		context_min_start_cycle_w = {1'b0, schedule_cycle_i} + 1'b1;
 		context_late_w = run_i && (context_min_start_cycle_w[32] || ({1'b0, context_start_cycle_i} < context_min_start_cycle_w));
 	end
 
@@ -301,12 +288,8 @@ module lpu_mem_macro_scheduler #(
 		end
 	end
 
-	// Form the absolute cycle inspected by the look-ahead selection logic.
-	always_comb begin
-		lookahead_cycle_sum_w = prime_mode_w ? 33'd0 : ({1'b0, schedule_cycle_i} + ISSUE_LOOKAHEAD);
-		lookahead_cycle_w = lookahead_cycle_sum_w[31:0];
-		lookahead_overflow_w = lookahead_cycle_sum_w[32];
-	end
+	// Without a downstream timed queue, the Scheduler owns the final absolute Issue Cycle.
+	assign mem_issue_cycle_w = schedule_cycle_i;
 
 	// Count occupied Active Context slots independently from deadline selection.
 	always_comb begin
@@ -318,7 +301,7 @@ module lpu_mem_macro_scheduler #(
 		end
 	end
 
-	// Select the first Context due at the look-ahead cycle and detect conflicts or missed generation points.
+	// Select the first Context due now and detect conflicts or missed deadlines.
 	always_comb begin
 		selected_context_found_w = 1'b0;
 		selected_index_w = 0;
@@ -326,10 +309,10 @@ module lpu_mem_macro_scheduler #(
 		missed_generation_w = 1'b0;
 		for(integer slot = 0; slot < ACTIVE_CONTEXTS; slot = slot + 1)begin
 			if(active_valid_q[slot])begin
-				if(active_next_issue_cycle_q[slot] < lookahead_cycle_w)begin
+				if(active_next_issue_cycle_q[slot] < mem_issue_cycle_w)begin
 					missed_generation_w = 1'b1;
 				end
-				else if(active_next_issue_cycle_q[slot] == lookahead_cycle_w)begin
+				else if(active_next_issue_cycle_q[slot] == mem_issue_cycle_w)begin
 					if(!selected_context_found_w)begin
 						selected_context_found_w = 1'b1;
 						selected_index_w = slot;
@@ -340,13 +323,20 @@ module lpu_mem_macro_scheduler #(
 		end
 	end
 
-	// The Scheduler computes one future base instruction; the Instruction Queue is the register boundary.
-	assign issue_valid_o = scheduler_active_w && selected_context_found_w && (due_count_w == 1) &&
-		!missed_generation_w && !fault_q;
-	assign issue_instruction_o = selected_context_found_w ?
+	// Pre-transfer faults suppress Issue so the execution boundary cannot accept uncommitted work.
+	assign issue_precondition_fault_w = timebase_violation_w ||
+		(scheduler_active_w && due_count_w > 1) ||
+		(scheduler_active_w && missed_generation_w) ||
+		(context_valid_i && context_illegal_w) ||
+		(run_i && schedule_cycle_i == 32'hffff_ffff);
+
+	// The Scheduler presents the instruction only on its absolute Issue Cycle.
+	assign mem_issue_valid_o = scheduler_active_w && selected_context_found_w && (due_count_w == 1) &&
+		!fault_q && !issue_precondition_fault_w;
+	assign mem_issue_instruction_o = selected_context_found_w ?
 		context_to_mem_instruction(active_instruction_q[selected_index_w], active_address_q[selected_index_w]) : '0;
-	assign issue_cycle_o = selected_context_found_w ? lookahead_cycle_w : '0;
-	assign instruction_queue_blocked_w = issue_valid_o && !issue_ready_i;
+	assign mem_issue_cycle_o = selected_context_found_w ? mem_issue_cycle_w : '0;
+	assign mem_issue_blocked_w = mem_issue_valid_o && !mem_issue_ready_i;
 	assign timebase_violation_w = run_i && run_seen_q &&
 		((previous_schedule_cycle_q == 32'hffff_ffff) || (schedule_cycle_i != previous_schedule_cycle_q + 1'b1));
 
@@ -358,13 +348,9 @@ module lpu_mem_macro_scheduler #(
 			dynamic_fault_w = 1'b1;
 			dynamic_fault_code_w = FAULT_TIMEBASE;
 		end
-		else if(run_i && lookahead_overflow_w)begin
+		else if(mem_issue_blocked_w)begin
 			dynamic_fault_w = 1'b1;
-			dynamic_fault_code_w = FAULT_LOOKAHEAD;
-		end
-		else if(instruction_queue_blocked_w)begin
-			dynamic_fault_w = 1'b1;
-			dynamic_fault_code_w = FAULT_TIMED_QUEUE_BACKPRESSURE;
+			dynamic_fault_code_w = FAULT_ISSUE_BACKPRESSURE;
 		end
 		else if(scheduler_active_w && due_count_w > 1)begin
 			dynamic_fault_w = 1'b1;
@@ -386,7 +372,7 @@ module lpu_mem_macro_scheduler #(
 
 	assign context_ready_o = free_slot_valid_w && !fault_q && !dynamic_fault_w;
 	assign context_admit_fire = context_valid_i && context_ready_o;
-	assign schedule_select_fire = issue_valid_o && issue_ready_i && !dynamic_fault_w;
+	assign schedule_select_fire = mem_issue_valid_o && mem_issue_ready_i && !dynamic_fault_w;
 	assign active_context_inner_advance_w = schedule_select_fire &&
 		(active_inner_remaining_q[selected_index_w] > 32'd1);
 	assign active_context_outer_advance_w = schedule_select_fire &&
@@ -395,12 +381,13 @@ module lpu_mem_macro_scheduler #(
 	assign active_context_retire_w = schedule_select_fire &&
 		(active_inner_remaining_q[selected_index_w] <= 32'd1) &&
 		(active_outer_remaining_q[selected_index_w] <= 32'd1);
-	assign prime_ready_o = prime_mode_w && !context_valid_i &&
-		(due_count_w == 0) && !fault_q && !dynamic_fault_w;
+	// PRIME completes once every decoded Context has entered Active Context storage.
+	// Instructions remain untouched until run_i asserts, including Cycle 0 work.
+	assign prime_ready_o = prime_mode_w && !context_valid_i && !fault_q && !dynamic_fault_w;
 	assign fault_o = fault_q || dynamic_fault_w;
 	assign fault_code_o = fault_q ? fault_code_q : dynamic_fault_code_w;
 
-	// Active Context state advances atomically on queue acceptance, while new Context admission uses a free slot.
+	// Active Context state advances atomically on Issue acceptance, while admission uses a free slot.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
 		if(!rst_ni)begin
 			for(integer slot = 0; slot < ACTIVE_CONTEXTS; slot = slot + 1)begin

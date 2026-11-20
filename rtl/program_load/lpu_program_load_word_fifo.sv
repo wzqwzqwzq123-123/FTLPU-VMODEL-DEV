@@ -9,7 +9,8 @@ module lpu_program_load_word_fifo #(
 	input logic [127:0] enqueue_data_i,
 	input logic [3:0] enqueue_strb_i,
 	input logic [1:0] enqueue_scope_i,
-	input logic [11:0] enqueue_destination_i,
+	input logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		enqueue_destination_i,
 	input logic [16:0] enqueue_imem_address_i,
 	input logic enqueue_last_i,
 
@@ -18,7 +19,8 @@ module lpu_program_load_word_fifo #(
 	output logic [127:0] dequeue_data_o,
 	output logic [3:0] dequeue_strb_o,
 	output logic [1:0] dequeue_scope_o,
-	output logic [11:0] dequeue_destination_o,
+	output logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		dequeue_destination_o,
 	output logic [16:0] dequeue_imem_address_o,
 	output logic dequeue_last_o,
 
@@ -26,7 +28,8 @@ module lpu_program_load_word_fifo #(
 	output logic empty_o,
 	output logic full_o
 );
-	localparam integer WORD_RECORD_WIDTH = 164;
+	localparam integer WORD_RECORD_WIDTH = 128 + 4 + 2 +
+		lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH + 17 + 1;
 
 	logic [WORD_RECORD_WIDTH-1:0] enqueue_record;
 	logic [WORD_RECORD_WIDTH-1:0] dequeue_record;
@@ -51,7 +54,7 @@ module lpu_program_load_word_fifo #(
 	assign empty_o = level_o == '0;
 	assign full_o = level_o == DEPTH;
 
-	lpu_queue_fifo #(
+	lpu_fifo #(
 		.DATA_WIDTH(WORD_RECORD_WIDTH),
 		.DEPTH(DEPTH)
 	) u_word_fifo (

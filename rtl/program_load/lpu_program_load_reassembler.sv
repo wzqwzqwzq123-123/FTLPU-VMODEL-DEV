@@ -10,7 +10,8 @@ module lpu_program_load_reassembler #(
 	output logic config_fifo_dequeue_ready_o,
 	input logic [31:0] config_fifo_dequeue_byte_count_i,
 	input logic [1:0] config_fifo_dequeue_scope_i,
-	input logic [11:0] config_fifo_dequeue_destination_i,
+	input logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		config_fifo_dequeue_destination_i,
 	input logic [1:0] config_fifo_dequeue_format_i,
 	input logic [16:0] config_fifo_dequeue_imem_base_address_i,
 	input logic config_fifo_dequeue_image_first_i,
@@ -31,7 +32,8 @@ module lpu_program_load_reassembler #(
 	output logic [127:0] reasm_word_data_o,
 	output logic [3:0] reasm_word_strb_o,
 	output logic [1:0] reasm_word_scope_o,
-	output logic [11:0] reasm_word_destination_o,
+	output logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0]
+		reasm_word_destination_o,
 	output logic [16:0] reasm_word_imem_address_o,
 	output logic reasm_word_image_last_o,
 
@@ -58,7 +60,7 @@ module lpu_program_load_reassembler #(
 	logic image_active_q;
 	logic config_seen_q;
 	logic [1:0] image_scope_q;
-	logic [11:0] image_destination_q;
+	logic [lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH-1:0] image_destination_q;
 	logic [1:0] image_format_q;
 	logic [16:0] image_imem_base_address_q;
 	logic [15:0] image_expected_word_count_q;
@@ -68,11 +70,11 @@ module lpu_program_load_reassembler #(
 	logic [15:0] generated_word_count_q;
 
 	logic [BUFFER_COUNT_WIDTH-1:0] keep_byte_count_w;
-	logic keep_invalid_w;
+	logic keep_mask_illegal_w;
 	logic config_start_w;
-	logic config_invalid_w;
-	logic response_fire;
-	logic word_fire;
+	logic config_descriptor_illegal_w;
+	logic reasm_rsp_fire;
+	logic reasm_word_fire;
 	logic final_word_w;
 	logic final_word_wait_w;
 	logic [4:0] word_bytes_w;
@@ -80,10 +82,10 @@ module lpu_program_load_reassembler #(
 	logic [31:0] transaction_received_next_w;
 	logic [31:0] image_received_next_w;
 	logic [31:0] expected_image_bytes_w;
-	logic reasm_rsp_id_invalid_w;
+	logic reasm_rsp_id_mismatch_w;
 	logic response_error_w;
-	logic burst_length_invalid_w;
-	logic image_length_invalid_w;
+	logic burst_length_mismatch_w;
+	logic image_length_mismatch_w;
 	logic fault_q;
 	logic [5:0] fault_code_q;
 	integer append_index;
@@ -138,7 +140,7 @@ module lpu_program_load_reassembler #(
 	assign final_word_wait_w = final_word_w && !image_last_seen_q;
 	assign reasm_word_valid_o = image_active_q && !fault_q &&
 		(buffer_count_q >= word_bytes_w) && !final_word_wait_w;
-	assign word_fire = reasm_word_valid_o && reasm_word_ready_i;
+	assign reasm_word_fire = reasm_word_valid_o && reasm_word_ready_i;
 
 	assign reasm_word_data_o = buffer_q[127:0];
 	assign reasm_word_strb_o = image_format_q == PROGRAM_FORMAT_96 ? 4'b0111 : 4'b1111;
@@ -148,17 +150,17 @@ module lpu_program_load_reassembler #(
 	assign reasm_word_image_last_o = final_word_w;
 
 	assign keep_byte_count_w = count_keep_bytes(reasm_rsp_keep_i);
-	assign keep_invalid_w = response_fire &&
+	assign keep_mask_illegal_w = reasm_rsp_fire &&
 		((keep_byte_count_w == '0) || keep_has_hole(reasm_rsp_keep_i));
 
-	assign buffer_after_pop_w = word_fire ? (buffer_q >> word_shift_bits_w) : buffer_q;
-	assign count_after_pop_w = word_fire ? (buffer_count_q - word_bytes_w) : buffer_count_q;
+	assign buffer_after_pop_w = reasm_word_fire ? (buffer_q >> word_shift_bits_w) : buffer_q;
+	assign count_after_pop_w = reasm_word_fire ? (buffer_count_q - word_bytes_w) : buffer_count_q;
 	// Input and output may fire together; append starts after the bytes removed by the current output.
 	always_comb begin
 		buffer_next_w = buffer_after_pop_w;
 		buffer_count_next_w = count_after_pop_w;
 		append_index = 0;
-		if(response_fire)begin
+		if(reasm_rsp_fire)begin
 			for(byte_index = 0; byte_index < DMA_BYTES; byte_index = byte_index + 1)begin
 				if(reasm_rsp_keep_i[byte_index])begin
 					buffer_next_w[(count_after_pop_w + append_index) * 8 +: 8] =
@@ -171,7 +173,7 @@ module lpu_program_load_reassembler #(
 	end
 
 	assign config_start_w = config_fifo_dequeue_valid_i && !config_seen_q && !fault_q;
-	assign config_invalid_w = config_start_w && (
+	assign config_descriptor_illegal_w = config_start_w && (
 		(config_fifo_dequeue_byte_count_i == '0) ||
 		((config_fifo_dequeue_format_i != PROGRAM_FORMAT_96) && (config_fifo_dequeue_format_i != PROGRAM_FORMAT_128)) ||
 		((config_fifo_dequeue_scope_i != PROGRAM_SCOPE_EAST) &&
@@ -195,19 +197,19 @@ module lpu_program_load_reassembler #(
 
 	assign reasm_rsp_ready_o = config_seen_q && !fault_q &&
 		(count_after_pop_w + keep_byte_count_w <= BUFFER_BYTES);
-	assign response_fire = reasm_rsp_valid_i && reasm_rsp_ready_o;
-	assign config_fifo_dequeue_ready_o = response_fire && reasm_rsp_last_i;
+	assign reasm_rsp_fire = reasm_rsp_valid_i && reasm_rsp_ready_o;
+	assign config_fifo_dequeue_ready_o = reasm_rsp_fire && reasm_rsp_last_i;
 
 	assign transaction_received_next_w = transaction_received_q + keep_byte_count_w;
 	assign image_received_next_w = image_received_q + keep_byte_count_w;
 	assign expected_image_bytes_w = {16'd0, image_expected_word_count_q} *
 		(image_format_q == PROGRAM_FORMAT_96 ? 32'd12 : 32'd16);
-	assign reasm_rsp_id_invalid_w = response_fire && (reasm_rsp_id_i != config_fifo_dequeue_dma_id_i);
-	assign response_error_w = response_fire && reasm_rsp_error_i;
-	assign burst_length_invalid_w = response_fire &&
+	assign reasm_rsp_id_mismatch_w = reasm_rsp_fire && (reasm_rsp_id_i != config_fifo_dequeue_dma_id_i);
+	assign response_error_w = reasm_rsp_fire && reasm_rsp_error_i;
+	assign burst_length_mismatch_w = reasm_rsp_fire &&
 		((transaction_received_next_w > config_fifo_dequeue_byte_count_i) ||
 		(reasm_rsp_last_i != (transaction_received_next_w == config_fifo_dequeue_byte_count_i)));
-	assign image_length_invalid_w = response_fire && reasm_rsp_last_i && config_fifo_dequeue_image_last_i &&
+	assign image_length_mismatch_w = reasm_rsp_fire && reasm_rsp_last_i && config_fifo_dequeue_image_last_i &&
 		(image_received_next_w != expected_image_bytes_w);
 
 	assign received_byte_count_o = image_received_q;
@@ -215,16 +217,16 @@ module lpu_program_load_reassembler #(
 
 	assign idle_o = !image_active_q && !config_seen_q && !config_fifo_dequeue_valid_i && (buffer_count_q == '0);
 
-	assign fault_o = fault_q || config_invalid_w || keep_invalid_w ||
-		reasm_rsp_id_invalid_w || response_error_w || burst_length_invalid_w ||
-		image_length_invalid_w;
+	assign fault_o = fault_q || config_descriptor_illegal_w || keep_mask_illegal_w ||
+		reasm_rsp_id_mismatch_w || response_error_w || burst_length_mismatch_w ||
+		image_length_mismatch_w;
 	assign fault_code_o = fault_q ? fault_code_q :
-		(config_invalid_w ? PROGRAM_FAULT_DESCRIPTOR :
-		(keep_invalid_w ? PROGRAM_FAULT_KEEP :
-		(reasm_rsp_id_invalid_w ? PROGRAM_FAULT_DMA_ID :
+		(config_descriptor_illegal_w ? PROGRAM_FAULT_DESCRIPTOR :
+		(keep_mask_illegal_w ? PROGRAM_FAULT_KEEP :
+		(reasm_rsp_id_mismatch_w ? PROGRAM_FAULT_DMA_ID :
 		(response_error_w ? PROGRAM_FAULT_DMA_RESPONSE :
-		(burst_length_invalid_w ? PROGRAM_FAULT_BURST_LENGTH :
-		(image_length_invalid_w ? PROGRAM_FAULT_IMAGE_LENGTH : PROGRAM_FAULT_NONE))))));
+		(burst_length_mismatch_w ? PROGRAM_FAULT_BURST_LENGTH :
+		(image_length_mismatch_w ? PROGRAM_FAULT_IMAGE_LENGTH : PROGRAM_FAULT_NONE))))));
 
 	// The byte reservoir is the only state changed by simultaneous beat acceptance and word emission.
 	always_ff @(posedge clk_i or negedge rst_ni) begin
@@ -232,7 +234,7 @@ module lpu_program_load_reassembler #(
 			buffer_q <= '0;
 			buffer_count_q <= '0;
 		end
-		else if(!fault_o && (word_fire || response_fire))begin
+		else if(!fault_o && (reasm_word_fire || reasm_rsp_fire))begin
 			buffer_q <= buffer_next_w;
 			buffer_count_q <= buffer_count_next_w;
 		end
@@ -245,10 +247,10 @@ module lpu_program_load_reassembler #(
 			transaction_received_q <= '0;
 		end
 		else if(!fault_o)begin
-			if(config_start_w && !config_invalid_w)begin
+			if(config_start_w && !config_descriptor_illegal_w)begin
 				config_seen_q <= 1'b1;
 			end
-			if(response_fire)begin
+			if(reasm_rsp_fire)begin
 				if(reasm_rsp_last_i)begin
 					config_seen_q <= 1'b0;
 					transaction_received_q <= '0;
@@ -274,7 +276,7 @@ module lpu_program_load_reassembler #(
 			generated_word_count_q <= '0;
 		end
 		else if(!fault_o)begin
-			if(config_start_w && !config_invalid_w && config_fifo_dequeue_image_first_i)begin
+			if(config_start_w && !config_descriptor_illegal_w && config_fifo_dequeue_image_first_i)begin
 				image_active_q <= 1'b1;
 				image_scope_q <= config_fifo_dequeue_scope_i;
 				image_destination_q <= config_fifo_dequeue_destination_i;
@@ -286,14 +288,14 @@ module lpu_program_load_reassembler #(
 				generated_word_count_q <= '0;
 			end
 
-			if(response_fire)begin
+			if(reasm_rsp_fire)begin
 				image_received_q <= image_received_next_w;
 				if(reasm_rsp_last_i && config_fifo_dequeue_image_last_i)begin
 					image_last_seen_q <= 1'b1;
 				end
 			end
 
-			if(word_fire)begin
+			if(reasm_word_fire)begin
 				if(final_word_w)begin
 					image_active_q <= 1'b0;
 					image_last_seen_q <= 1'b0;
@@ -314,15 +316,15 @@ module lpu_program_load_reassembler #(
 			fault_code_q <= PROGRAM_FAULT_NONE;
 		end
 		else if(!fault_q)begin
-			if(config_invalid_w)begin
+			if(config_descriptor_illegal_w)begin
 				fault_q <= 1'b1;
 				fault_code_q <= PROGRAM_FAULT_DESCRIPTOR;
 			end
-			else if(keep_invalid_w && reasm_rsp_ready_o)begin
+			else if(keep_mask_illegal_w && reasm_rsp_ready_o)begin
 				fault_q <= 1'b1;
 				fault_code_q <= PROGRAM_FAULT_KEEP;
 			end
-			else if(reasm_rsp_id_invalid_w)begin
+			else if(reasm_rsp_id_mismatch_w)begin
 				fault_q <= 1'b1;
 				fault_code_q <= PROGRAM_FAULT_DMA_ID;
 			end
@@ -330,11 +332,11 @@ module lpu_program_load_reassembler #(
 				fault_q <= 1'b1;
 				fault_code_q <= PROGRAM_FAULT_DMA_RESPONSE;
 			end
-			else if(burst_length_invalid_w)begin
+			else if(burst_length_mismatch_w)begin
 				fault_q <= 1'b1;
 				fault_code_q <= PROGRAM_FAULT_BURST_LENGTH;
 			end
-			else if(image_length_invalid_w)begin
+			else if(image_length_mismatch_w)begin
 				fault_q <= 1'b1;
 				fault_code_q <= PROGRAM_FAULT_IMAGE_LENGTH;
 			end
