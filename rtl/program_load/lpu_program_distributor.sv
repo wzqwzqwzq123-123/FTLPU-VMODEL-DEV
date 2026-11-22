@@ -51,7 +51,7 @@ module lpu_program_distributor #(
 	logic [16:0] head_imem_address;
 	logic head_last;
 	logic elastic_idle;
-	logic [2:0] head_target_kind_w;
+	logic [lpu_program_load_pkg::PROGRAM_TARGET_KIND_WIDTH-1:0] head_target_kind_w;
 	logic vxm_target_w;
 
 	logic west_relay_required_w;

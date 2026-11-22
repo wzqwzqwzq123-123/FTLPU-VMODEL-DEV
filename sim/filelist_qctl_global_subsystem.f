@@ -1,0 +1,11 @@
+rtl/icu/lpu_qctl_pkg.sv
+rtl/icu/lpu_qctl_load_manager.sv
+rtl/icu/lpu_qctl_relay.sv
+rtl/icu/lpu_qctl_relay_chain.sv
+rtl/icu/lpu_qctl_controller.sv
+rtl/icu/lpu_qctl_endpoint.sv
+rtl/icu/lpu_qctl_event_buffer.sv
+rtl/icu/lpu_qctl_fabric.sv
+rtl/icu/lpu_qctl_global_subsystem.sv
+sim/tb/lpu_qctl_global_subsystem_tb.sv
+sim/tb/lpu_qctl_distributed_trace_tb.sv

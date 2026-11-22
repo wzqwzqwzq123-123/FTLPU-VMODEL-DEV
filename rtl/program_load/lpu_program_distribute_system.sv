@@ -68,7 +68,7 @@ module lpu_program_distribute_system (
 	logic program_transport_rst_ni;
 	logic route_fault_q;
 	logic [1:0] destination_hemisphere_match_w;
-	logic [5:0] destination_target_kind_w;
+	logic [2*PROGRAM_TARGET_KIND_WIDTH-1:0] destination_target_kind_w;
 	logic [15:0] destination_target_index_w;
 	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_write_fire_w;
 	logic [PROGRAM_RELAY_PORT_COUNT-1:0] mem_write_error_w;
@@ -140,7 +140,7 @@ module lpu_program_distribute_system (
 	logic [255:0] relay_outer_data;
 	logic [7:0] relay_outer_strb;
 	logic [3:0] relay_outer_scope;
-	logic [23:0] relay_outer_destination;
+	logic [2*PROGRAM_DESTINATION_WIDTH-1:0] relay_outer_destination;
 	logic [33:0] relay_outer_address;
 	logic [1:0] relay_outer_last;
 	logic [1:0] relay_chain_idle;
@@ -150,7 +150,7 @@ module lpu_program_distribute_system (
 	logic [1:0] endpoint_vxm_route_w;
 	logic [1:0] endpoint_chain_route_w;
 	logic [1:0] outer_endpoint_fire_w;
-	logic [5:0] outer_target_kind_w;
+	logic [2*PROGRAM_TARGET_KIND_WIDTH-1:0] outer_target_kind_w;
 	logic [15:0] outer_target_index_w;
 	logic [1:0] outer_mxm_route_w;
 	logic [1:0] outer_sxm_route_w;
@@ -327,7 +327,9 @@ module lpu_program_distribute_system (
 					 lpu_pkg::MEM_BANKS_PER_HEMISPHERE);
 				PROGRAM_TARGET_MXM_LOAD,
 				PROGRAM_TARGET_MXM_DEQUANT,
-				PROGRAM_TARGET_MXM_COMPUTE: endpoint_route_legal_w[hemisphere] =
+				PROGRAM_TARGET_MXM_COMPUTE,
+				PROGRAM_TARGET_MXM_PARAM_LOAD,
+				PROGRAM_TARGET_MXM_BACKEND: endpoint_route_legal_w[hemisphere] =
 					destination_hemisphere_match_w[hemisphere] &&
 					(destination_target_index_w[
 					 hemisphere*PROGRAM_TARGET_INDEX_WIDTH+:PROGRAM_TARGET_INDEX_WIDTH] < 2);
@@ -438,10 +440,16 @@ module lpu_program_distribute_system (
 				outer_gen*PROGRAM_DESTINATION_WIDTH+PROGRAM_DESTINATION_INDEX_LSB+:
 				PROGRAM_TARGET_INDEX_WIDTH];
 			assign outer_mxm_route_w[outer_gen] =
-				(outer_target_kind_w[outer_gen*PROGRAM_TARGET_KIND_WIDTH+:
-				 PROGRAM_TARGET_KIND_WIDTH] >= PROGRAM_TARGET_MXM_LOAD) &&
-				(outer_target_kind_w[outer_gen*PROGRAM_TARGET_KIND_WIDTH+:
-				 PROGRAM_TARGET_KIND_WIDTH] <= PROGRAM_TARGET_MXM_COMPUTE) &&
+				((outer_target_kind_w[outer_gen*PROGRAM_TARGET_KIND_WIDTH+:
+				  PROGRAM_TARGET_KIND_WIDTH] == PROGRAM_TARGET_MXM_LOAD) ||
+				 (outer_target_kind_w[outer_gen*PROGRAM_TARGET_KIND_WIDTH+:
+				  PROGRAM_TARGET_KIND_WIDTH] == PROGRAM_TARGET_MXM_DEQUANT) ||
+				 (outer_target_kind_w[outer_gen*PROGRAM_TARGET_KIND_WIDTH+:
+				  PROGRAM_TARGET_KIND_WIDTH] == PROGRAM_TARGET_MXM_COMPUTE) ||
+				 (outer_target_kind_w[outer_gen*PROGRAM_TARGET_KIND_WIDTH+:
+				  PROGRAM_TARGET_KIND_WIDTH] == PROGRAM_TARGET_MXM_PARAM_LOAD) ||
+				 (outer_target_kind_w[outer_gen*PROGRAM_TARGET_KIND_WIDTH+:
+				  PROGRAM_TARGET_KIND_WIDTH] == PROGRAM_TARGET_MXM_BACKEND)) &&
 				(outer_target_index_w[outer_gen*PROGRAM_TARGET_INDEX_WIDTH+:
 				 PROGRAM_TARGET_INDEX_WIDTH] < 2);
 			assign outer_sxm_route_w[outer_gen] =

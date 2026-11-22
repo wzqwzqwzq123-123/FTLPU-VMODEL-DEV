@@ -10,7 +10,7 @@ module lpu_top #(
 	parameter integer PROGRAM_MXM_IMEM_DEPTH = 65536,
 	parameter integer PROGRAM_ACTIVE_CONTEXTS = 4,
 	parameter bit ENABLE_QCTL = 1'b0,
-	parameter integer QCTL_QUEUE_COUNT = 220,
+	parameter integer QCTL_QUEUE_COUNT = 228,
 	parameter integer PROGRAM_COMMAND_ADDRESS_WIDTH = PROGRAM_COMMAND_DEPTH <= 1 ? 1 : $clog2(PROGRAM_COMMAND_DEPTH)
 ) (
 	input logic clk_i,
@@ -111,14 +111,20 @@ module lpu_top #(
 	logic [MEM_BANK_COUNT*lpu_pkg::MEM_INSTRUCTION_WIDTH-1:0] local_mem_issue_instruction;
 	logic [MEM_BANK_COUNT*32-1:0] local_mem_issue_cycle;
 	logic [3:0] local_mxm_load_issue_valid;
-	logic [4*29-1:0] local_mxm_load_issue_instruction;
+	logic [4*lpu_mxm_isa_pkg::LOAD_INSTRUCTION_BITS-1:0] local_mxm_load_issue_instruction;
 	logic [4*32-1:0] local_mxm_load_issue_cycle;
 	logic [3:0] local_mxm_dequant_issue_valid;
-	logic [4*16-1:0] local_mxm_dequant_issue_instruction;
+	logic [4*lpu_mxm_isa_pkg::DEQUANT_INSTRUCTION_BITS-1:0] local_mxm_dequant_issue_instruction;
 	logic [4*32-1:0] local_mxm_dequant_issue_cycle;
 	logic [3:0] local_mxm_compute_issue_valid;
-	logic [4*49-1:0] local_mxm_compute_issue_instruction;
+	logic [4*lpu_mxm_isa_pkg::COMPUTE_INSTRUCTION_BITS-1:0] local_mxm_compute_issue_instruction;
 	logic [4*32-1:0] local_mxm_compute_issue_cycle;
+	logic [3:0] local_mxm_param_load_issue_valid;
+	logic [4*lpu_mxm_isa_pkg::PARAM_LOAD_INSTRUCTION_BITS-1:0] local_mxm_param_load_issue_instruction;
+	logic [4*32-1:0] local_mxm_param_load_issue_cycle;
+	logic [3:0] local_mxm_backend_issue_valid;
+	logic [4*lpu_mxm_backend_isa_pkg::BACKEND_INSTRUCTION_BITS-1:0] local_mxm_backend_issue_instruction;
+	logic [4*32-1:0] local_mxm_backend_issue_cycle;
 	logic load_distribute_valid;
 	logic load_distribute_ready;
 	logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] load_distribute_control;
@@ -147,7 +153,7 @@ module lpu_top #(
 	logic [1:0] sxm_program_ready;
 	logic [1:0] sxm_program_error;
 	logic [2*PROGRAM_LOAD_CONTROL_WIDTH-1:0] outer_program_control;
-	logic [23:0] outer_program_destination;
+	logic [2*PROGRAM_DESTINATION_WIDTH-1:0] outer_program_destination;
 	logic [33:0] outer_program_address;
 	logic [255:0] outer_program_data;
 	logic [7:0] outer_program_strb;
@@ -307,6 +313,12 @@ module lpu_top #(
 		.local_mxm_dequant_issue_valid_o(local_mxm_dequant_issue_valid), .local_mxm_dequant_issue_instruction_o(local_mxm_dequant_issue_instruction),
 		.local_mxm_dequant_issue_cycle_o(local_mxm_dequant_issue_cycle), .local_mxm_compute_issue_valid_o(local_mxm_compute_issue_valid),
 		.local_mxm_compute_issue_instruction_o(local_mxm_compute_issue_instruction), .local_mxm_compute_issue_cycle_o(local_mxm_compute_issue_cycle),
+		.local_mxm_param_load_issue_valid_o(local_mxm_param_load_issue_valid),
+		.local_mxm_param_load_issue_instruction_o(local_mxm_param_load_issue_instruction),
+		.local_mxm_param_load_issue_cycle_o(local_mxm_param_load_issue_cycle),
+		.local_mxm_backend_issue_valid_o(local_mxm_backend_issue_valid),
+		.local_mxm_backend_issue_instruction_o(local_mxm_backend_issue_instruction),
+		.local_mxm_backend_issue_cycle_o(local_mxm_backend_issue_cycle),
 		.mem_east_edge_valid_i, .mem_east_edge_data_i,
 		.mem_east_edge_valid_o, .mem_east_edge_data_o, .mem_west_edge_valid_i, .mem_west_edge_data_i,
 		.mem_west_edge_valid_o, .mem_west_edge_data_o, .mem_fault_o, .mxm_fault_o, .sxm_fault_o,

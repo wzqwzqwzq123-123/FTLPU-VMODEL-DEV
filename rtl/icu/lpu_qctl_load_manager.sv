@@ -2,7 +2,7 @@
 // converting accepted partitions and records into explicit Relay packets.
 module lpu_qctl_load_manager #(
 	parameter integer TOTAL_CAPACITY = 512,
-	parameter integer QUEUE_COUNT = 220,
+	parameter integer QUEUE_COUNT = lpu_qctl_pkg::QCTL_QUEUE_COUNT,
 	parameter integer QUEUE_ENTRY_LIMIT = 16,
 	parameter integer GENERATION_WIDTH = 64,
 	parameter integer ADDRESS_WIDTH = TOTAL_CAPACITY <= 1 ? 1 : $clog2(TOTAL_CAPACITY),

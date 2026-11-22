@@ -3,8 +3,6 @@ module lpu_mxm_subsystem #(
 	parameter integer LOCAL_MXM_INDEX = 0,
 	parameter integer IMEM_DEPTH = 65536,
 	parameter integer ACTIVE_CONTEXTS = 4,
-	parameter integer FU_QUEUE_DEPTH = 16,
-	parameter integer ACCUMULATOR_BLOCK_COUNT = lpu_pkg::MXM_ACCUMULATOR_BLOCK_COUNT,
 	parameter bit PAIR_LOAD_DEQUANT = 1'b0,
 	parameter integer QCTL_QUEUE_ENTRY_LIMIT = 16,
 	parameter integer QCTL_GENERATION_WIDTH = 64,
@@ -17,32 +15,31 @@ module lpu_mxm_subsystem #(
 	input logic local_frontend_enable_i,
 	input logic run_i,
 	input logic [31:0] schedule_cycle_i,
-	input logic [2:0] qctl_configure_valid_i,
-	input logic [3*QCTL_ENTRY_COUNT_WIDTH-1:0] qctl_configure_count_i,
-	input logic [3*QCTL_GENERATION_WIDTH-1:0] qctl_configure_generation_i,
-	output logic [3*QCTL_ENTRY_INDEX_WIDTH-1:0] qctl_head_index_o,
-	output logic [3*QCTL_GENERATION_WIDTH-1:0] qctl_head_generation_o,
-	input logic [2:0] qctl_store_loaded_i,
-	input logic [2:0] qctl_head_valid_i,
-	input logic [3*lpu_qctl_pkg::QCTL_RECORD_WIDTH-1:0] qctl_head_record_i,
-	input logic [2:0] qctl_head_error_i,
-	input logic [2:0] qctl_event_valid_i,
+	input logic [4:0] qctl_configure_valid_i,
+	input logic [5*QCTL_ENTRY_COUNT_WIDTH-1:0] qctl_configure_count_i,
+	input logic [5*QCTL_GENERATION_WIDTH-1:0] qctl_configure_generation_i,
+	output logic [5*QCTL_ENTRY_INDEX_WIDTH-1:0] qctl_head_index_o,
+	output logic [5*QCTL_GENERATION_WIDTH-1:0] qctl_head_generation_o,
+	input logic [4:0] qctl_store_loaded_i,
+	input logic [4:0] qctl_head_valid_i,
+	input logic [5*lpu_qctl_pkg::QCTL_RECORD_WIDTH-1:0] qctl_head_record_i,
+	input logic [4:0] qctl_head_error_i,
+	input logic [4:0] qctl_event_valid_i,
 	input logic [lpu_qctl_pkg::QCTL_OPERAND_WIDTH-1:0] qctl_event_tag_i,
-	output logic [2:0] qctl_event_wait_o,
-	output logic [2:0] qctl_event_consume_o,
-	output logic [2:0] qctl_sync_arrive_valid_o,
-	input logic [2:0] qctl_sync_release_valid_i,
-	output logic [2:0] qctl_notify_valid_o,
-	input logic [2:0] qctl_notify_ready_i,
-	output logic [2:0] qctl_mem_packet_valid_o,
-	output logic [3*lpu_qctl_pkg::QCTL_OPERAND_WIDTH-1:0] qctl_mem_packet_ordinal_o,
-	input logic [2:0] qctl_mem_packet_retired_i,
-	output logic [2:0] qctl_configured_o,
-	output logic [2:0] qctl_primed_o,
-	output logic [2:0] qctl_done_o,
-	output logic [2:0] qctl_fault_o,
-	output logic [3*4-1:0] qctl_fault_code_o,
-
+	output logic [4:0] qctl_event_wait_o,
+	output logic [4:0] qctl_event_consume_o,
+	output logic [4:0] qctl_sync_arrive_valid_o,
+	input logic [4:0] qctl_sync_release_valid_i,
+	output logic [4:0] qctl_notify_valid_o,
+	input logic [4:0] qctl_notify_ready_i,
+	output logic [4:0] qctl_mem_packet_valid_o,
+	output logic [5*lpu_qctl_pkg::QCTL_OPERAND_WIDTH-1:0] qctl_mem_packet_ordinal_o,
+	input logic [4:0] qctl_mem_packet_retired_i,
+	output logic [4:0] qctl_configured_o,
+	output logic [4:0] qctl_primed_o,
+	output logic [4:0] qctl_done_o,
+	output logic [4:0] qctl_fault_o,
+	output logic [5*4-1:0] qctl_fault_code_o,
 	input logic program_valid_i,
 	output logic program_ready_o,
 	input logic [lpu_program_load_pkg::PROGRAM_LOAD_CONTROL_WIDTH-1:0] program_control_i,
@@ -52,29 +49,31 @@ module lpu_mxm_subsystem #(
 	input logic [3:0] program_strb_i,
 	input logic program_last_i,
 	output logic program_error_o,
-
 	input logic external_load_valid_i,
 	input logic [47:0] external_load_instruction_i,
 	input logic external_dequant_valid_i,
 	input logic [15:0] external_dequant_instruction_i,
 	input logic external_compute_valid_i,
 	input logic [47:0] external_compute_instruction_i,
-
 	output logic local_load_issue_valid_o,
-	output logic [28:0] local_load_issue_instruction_o,
+	output logic [lpu_mxm_isa_pkg::LOAD_INSTRUCTION_BITS-1:0] local_load_issue_instruction_o,
 	output logic [31:0] local_load_issue_cycle_o,
 	output logic local_dequant_issue_valid_o,
-	output logic [15:0] local_dequant_issue_instruction_o,
+	output logic [lpu_mxm_isa_pkg::DEQUANT_INSTRUCTION_BITS-1:0] local_dequant_issue_instruction_o,
 	output logic [31:0] local_dequant_issue_cycle_o,
 	output logic local_compute_issue_valid_o,
-	output logic [48:0] local_compute_issue_instruction_o,
+	output logic [lpu_mxm_isa_pkg::COMPUTE_INSTRUCTION_BITS-1:0] local_compute_issue_instruction_o,
 	output logic [31:0] local_compute_issue_cycle_o,
-
+	output logic local_param_load_issue_valid_o,
+	output logic [lpu_mxm_isa_pkg::PARAM_LOAD_INSTRUCTION_BITS-1:0] local_param_load_issue_instruction_o,
+	output logic [31:0] local_param_load_issue_cycle_o,
+	output logic local_backend_issue_valid_o,
+	output logic [lpu_mxm_backend_isa_pkg::BACKEND_INSTRUCTION_BITS-1:0] local_backend_issue_instruction_o,
+	output logic [31:0] local_backend_issue_cycle_o,
 	output logic frontends_ready_o,
 	output logic frontends_idle_o,
 	output logic frontend_fault_o,
 	output logic [5:0] frontend_fault_code_o,
-
 	input logic [4*32-1:0] east_from_sxm_valid_i,
 	input logic [4*32*64-1:0] east_from_sxm_data_i,
 	input logic [4*32-1:0] external_west_valid_i,
@@ -87,313 +86,272 @@ module lpu_mxm_subsystem #(
 	output logic conflict_o
 );
 	import lpu_program_load_pkg::*;
-
-	logic write_fire_w;
-	logic prime_fire_w;
-	logic destination_legal_w;
-	logic [2:0] program_target_kind_w;
+	import lpu_mxm_isa_pkg::*;
+	localparam integer STREAM_COUNT = MXM_QUEUE_COUNT;
+	localparam integer ROWS = lpu_mxm_config_pkg::SC_ROWS;
+	localparam integer TERMS = lpu_mxm_config_pkg::CELL_K;
+	localparam integer OUTPUTS = lpu_mxm_config_pkg::CELL_N;
+	localparam integer WEIGHT_STREAMS = lpu_mxm_config_pkg::WEIGHT_STREAM_COUNT;
+	logic [PROGRAM_TARGET_KIND_WIDTH-1:0] program_target_kind_w;
 	logic [7:0] program_target_index_w;
-	logic load_load_ready;
-	logic load_prime_ready;
-	logic dequant_load_ready;
-	logic dequant_prime_ready;
-	logic compute_load_ready;
-	logic compute_prime_ready;
-	logic load_ready;
-	logic load_idle;
-	logic load_fault;
-	logic [5:0] load_fault_code;
-	logic dequant_ready;
-	logic dequant_idle;
-	logic dequant_fault;
-	logic [5:0] dequant_fault_code;
-	logic compute_ready;
-	logic compute_idle;
-	logic compute_fault;
-	logic [5:0] compute_fault_code;
-	logic load_frontend_valid;
-	logic load_frontend_ready;
-	logic [48:0] load_frontend_instruction;
-	logic [31:0] load_frontend_cycle;
-	logic dequant_frontend_valid;
-	logic dequant_frontend_ready;
-	logic [48:0] dequant_frontend_instruction;
-	logic [31:0] dequant_frontend_cycle;
-	logic compute_frontend_valid;
-	logic compute_frontend_ready;
-	logic [48:0] compute_frontend_instruction;
-	logic [31:0] compute_frontend_cycle;
-	logic load_source_valid;
-	logic load_source_ready;
-	logic [48:0] load_source_instruction;
-	logic [31:0] load_source_cycle;
-	logic dequant_source_valid;
-	logic dequant_source_ready;
-	logic [48:0] dequant_source_instruction;
-	logic [31:0] dequant_source_cycle;
-	logic compute_source_valid;
-	logic compute_source_ready;
-	logic [48:0] compute_source_instruction;
-	logic [31:0] compute_source_cycle;
-	logic load_queue_fault;
-	logic dequant_queue_fault;
-	logic compute_queue_fault;
-	logic [$clog2(FU_QUEUE_DEPTH+1)-1:0] load_queue_level;
-	logic [$clog2(FU_QUEUE_DEPTH+1)-1:0] dequant_queue_level;
-	logic [$clog2(FU_QUEUE_DEPTH+1)-1:0] compute_queue_level;
-	logic coordinator_fault;
-	logic [2:0] coordinator_fault_code;
-	logic compute_width_violation_w;
-	logic execution_load_valid;
-	logic [47:0] execution_load_instruction;
-	logic execution_dequant_valid;
-	logic [15:0] execution_dequant_instruction;
-	logic execution_compute_valid;
-	logic [47:0] execution_compute_instruction;
-	logic frontend_rst_ni;
-	logic [2:0] frontend_run;
-	logic [3*32-1:0] frontend_schedule_cycle;
-	logic [2:0] qctl_scheduler_counter_ce;
-	logic [3*32-1:0] qctl_scheduler_cycle_q;
+	logic destination_legal_w,write_fire_w,prime_fire_w,frontend_rst_ni;
+	logic [STREAM_COUNT-1:0] frontend_run,frontend_load_ready,frontend_prime_ready;
+	logic [STREAM_COUNT-1:0] frontend_ready,frontend_idle,frontend_fault;
+	logic [STREAM_COUNT-1:0] frontend_issue_valid,frontend_issue_ready;
+	logic [STREAM_COUNT*32-1:0] frontend_schedule_cycle,frontend_issue_cycle,qctl_scheduler_cycle_q;
+	logic [STREAM_COUNT*6-1:0] frontend_fault_code;
+	logic [STREAM_COUNT*49-1:0] frontend_issue_instruction;
+	logic [STREAM_COUNT-1:0] qctl_scheduler_counter_ce;
+	logic load_core_ready,dequant_core_ready,compute_core_ready,param_core_ready,backend_core_ready;
+	logic pair_mismatch_w;
+	logic [ROWS-1:0] activation_valid,returned_valid;
+	logic [ROWS*TERMS*16-1:0] activation_data;
+	logic [ROWS*WEIGHT_STREAMS*TERMS-1:0] weight_valid;
+	logic [ROWS*WEIGHT_STREAMS*TERMS*8-1:0] weight_data;
+	logic [ROWS*OUTPUTS*32-1:0] returned_data;
+	logic core_fault;
+	logic unused_external;
+	integer program_stream_index;
+	integer fault_stream_index;
+	integer data_row_index,data_stream_index,data_term_index;
+	integer output_row_index,output_stream_index;
 
-	assign program_target_kind_w = program_destination_i[
-		PROGRAM_DESTINATION_KIND_MSB:PROGRAM_DESTINATION_KIND_LSB];
-	assign program_target_index_w = program_destination_i[
-		PROGRAM_DESTINATION_INDEX_MSB:PROGRAM_DESTINATION_INDEX_LSB];
+	function automatic integer stream_target_kind(input integer stream);
+		case(stream)
+			MXM_QUEUE_LOAD: stream_target_kind = PROGRAM_TARGET_MXM_LOAD;
+			MXM_QUEUE_COMPUTE: stream_target_kind = PROGRAM_TARGET_MXM_COMPUTE;
+			MXM_QUEUE_DEQUANT: stream_target_kind = PROGRAM_TARGET_MXM_DEQUANT;
+			MXM_QUEUE_PARAM_LOAD: stream_target_kind = PROGRAM_TARGET_MXM_PARAM_LOAD;
+			default: stream_target_kind = PROGRAM_TARGET_MXM_BACKEND;
+		endcase
+	endfunction
+
+	assign program_target_kind_w = program_destination_i[PROGRAM_DESTINATION_KIND_MSB:PROGRAM_DESTINATION_KIND_LSB];
+	assign program_target_index_w = program_destination_i[PROGRAM_DESTINATION_INDEX_MSB:PROGRAM_DESTINATION_INDEX_LSB];
 	assign destination_legal_w =
 		(program_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] == HEMISPHERE_INDEX) &&
 		(program_target_index_w == LOCAL_MXM_INDEX) &&
-		(program_target_kind_w >= PROGRAM_TARGET_MXM_LOAD) &&
-		(program_target_kind_w <= PROGRAM_TARGET_MXM_COMPUTE);
+		((program_target_kind_w == PROGRAM_TARGET_MXM_LOAD) ||
+		 (program_target_kind_w == PROGRAM_TARGET_MXM_DEQUANT) ||
+		 (program_target_kind_w == PROGRAM_TARGET_MXM_COMPUTE) ||
+		 (program_target_kind_w == PROGRAM_TARGET_MXM_PARAM_LOAD) ||
+		 (program_target_kind_w == PROGRAM_TARGET_MXM_BACKEND));
 	assign write_fire_w = program_valid_i && program_ready_o &&
 		(program_control_i == PROGRAM_LOAD_WRITE) && destination_legal_w &&
 		(program_strb_i == 4'b1111) && (program_address_i < IMEM_DEPTH);
 	assign prime_fire_w = program_valid_i && program_ready_o &&
 		(program_control_i == PROGRAM_LOAD_PRIME) && destination_legal_w;
 	assign frontend_rst_ni = rst_ni && !program_reset_i;
-	// Stream order is Load, Dequant, Compute. Each FU-local endpoint owns one
-	// Cache, Controller and Scheduler counter without central endpoint state.
-	generate
-		for(genvar stream_index = 0; stream_index < 3; stream_index++)begin : gen_qctl_stream_select
-			assign frontend_run[stream_index] = local_frontend_enable_i &&
-				(qctl_configured_o[stream_index] ? qctl_scheduler_counter_ce[stream_index] : run_i);
-			assign frontend_schedule_cycle[stream_index*32+:32] = qctl_configured_o[stream_index] ?
-				qctl_scheduler_cycle_q[stream_index*32+:32] : schedule_cycle_i;
 
+	// Each Stream owns one QCTL endpoint and one pauseable local Schedule Cycle.
+	generate
+		for(genvar qctl_stream = 0; qctl_stream < STREAM_COUNT; qctl_stream++)begin : gen_qctl_stream
+			assign frontend_run[qctl_stream] = local_frontend_enable_i &&
+				(qctl_configured_o[qctl_stream] ? qctl_scheduler_counter_ce[qctl_stream] : run_i);
+			assign frontend_schedule_cycle[qctl_stream*32+:32] = qctl_configured_o[qctl_stream] ?
+				qctl_scheduler_cycle_q[qctl_stream*32+:32] : schedule_cycle_i;
 			lpu_qctl_endpoint #(
-				.QUEUE_ENTRY_LIMIT(QCTL_QUEUE_ENTRY_LIMIT),
-				.GENERATION_WIDTH(QCTL_GENERATION_WIDTH)
+				.QUEUE_ENTRY_LIMIT(QCTL_QUEUE_ENTRY_LIMIT), .GENERATION_WIDTH(QCTL_GENERATION_WIDTH)
 			) u_qctl_endpoint (
 				.clk_i, .rst_ni, .clear_i(program_reset_i), .run_i(run_i),
-				.configure_valid_i(qctl_configure_valid_i[stream_index]),
-				.configure_count_i(qctl_configure_count_i[
-					stream_index*QCTL_ENTRY_COUNT_WIDTH+:QCTL_ENTRY_COUNT_WIDTH]),
-				.configure_generation_i(qctl_configure_generation_i[
-					stream_index*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH]),
-				.store_head_index_o(qctl_head_index_o[
-					stream_index*QCTL_ENTRY_INDEX_WIDTH+:QCTL_ENTRY_INDEX_WIDTH]),
-				.store_head_generation_o(qctl_head_generation_o[
-					stream_index*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH]),
-				.store_loaded_i(qctl_store_loaded_i[stream_index]),
-				.store_head_valid_i(qctl_head_valid_i[stream_index]),
-				.store_head_record_i(qctl_head_record_i[
-					stream_index*lpu_qctl_pkg::QCTL_RECORD_WIDTH+:lpu_qctl_pkg::QCTL_RECORD_WIDTH]),
-				.store_head_error_i(qctl_head_error_i[stream_index]),
-				.scheduler_cycle_i(qctl_scheduler_cycle_q[stream_index*32+:32]),
-				.scheduler_counter_ce_o(qctl_scheduler_counter_ce[stream_index]),
-				.event_valid_i(qctl_event_valid_i[stream_index]), .event_tag_i(qctl_event_tag_i),
-				.event_wait_o(qctl_event_wait_o[stream_index]),
-				.event_consume_o(qctl_event_consume_o[stream_index]),
-				.sync_arrive_valid_o(qctl_sync_arrive_valid_o[stream_index]),
-				.sync_release_valid_i(qctl_sync_release_valid_i[stream_index]),
-				.notify_valid_o(qctl_notify_valid_o[stream_index]),
-				.notify_ready_i(qctl_notify_ready_i[stream_index]),
-				.mem_packet_valid_o(qctl_mem_packet_valid_o[stream_index]),
-				.mem_packet_ordinal_o(qctl_mem_packet_ordinal_o[
-					stream_index*lpu_qctl_pkg::QCTL_OPERAND_WIDTH+:lpu_qctl_pkg::QCTL_OPERAND_WIDTH]),
-				.mem_packet_retired_i(qctl_mem_packet_retired_i[stream_index]),
-				.configured_o(qctl_configured_o[stream_index]),
-				.primed_o(qctl_primed_o[stream_index]), .done_o(qctl_done_o[stream_index]),
-				.fault_o(qctl_fault_o[stream_index]),
-				.fault_code_o(qctl_fault_code_o[stream_index*4+:4])
+				.configure_valid_i(qctl_configure_valid_i[qctl_stream]),
+				.configure_count_i(qctl_configure_count_i[qctl_stream*QCTL_ENTRY_COUNT_WIDTH+:QCTL_ENTRY_COUNT_WIDTH]),
+				.configure_generation_i(qctl_configure_generation_i[qctl_stream*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH]),
+				.store_head_index_o(qctl_head_index_o[qctl_stream*QCTL_ENTRY_INDEX_WIDTH+:QCTL_ENTRY_INDEX_WIDTH]),
+				.store_head_generation_o(qctl_head_generation_o[qctl_stream*QCTL_GENERATION_WIDTH+:QCTL_GENERATION_WIDTH]),
+				.store_loaded_i(qctl_store_loaded_i[qctl_stream]), .store_head_valid_i(qctl_head_valid_i[qctl_stream]),
+				.store_head_record_i(qctl_head_record_i[qctl_stream*lpu_qctl_pkg::QCTL_RECORD_WIDTH+:lpu_qctl_pkg::QCTL_RECORD_WIDTH]),
+				.store_head_error_i(qctl_head_error_i[qctl_stream]),
+				.scheduler_cycle_i(qctl_scheduler_cycle_q[qctl_stream*32+:32]),
+				.scheduler_counter_ce_o(qctl_scheduler_counter_ce[qctl_stream]),
+				.event_valid_i(qctl_event_valid_i[qctl_stream]), .event_tag_i(qctl_event_tag_i),
+				.event_wait_o(qctl_event_wait_o[qctl_stream]), .event_consume_o(qctl_event_consume_o[qctl_stream]),
+				.sync_arrive_valid_o(qctl_sync_arrive_valid_o[qctl_stream]),
+				.sync_release_valid_i(qctl_sync_release_valid_i[qctl_stream]),
+				.notify_valid_o(qctl_notify_valid_o[qctl_stream]), .notify_ready_i(qctl_notify_ready_i[qctl_stream]),
+				.mem_packet_valid_o(qctl_mem_packet_valid_o[qctl_stream]),
+				.mem_packet_ordinal_o(qctl_mem_packet_ordinal_o[qctl_stream*lpu_qctl_pkg::QCTL_OPERAND_WIDTH+:lpu_qctl_pkg::QCTL_OPERAND_WIDTH]),
+				.mem_packet_retired_i(qctl_mem_packet_retired_i[qctl_stream]),
+				.configured_o(qctl_configured_o[qctl_stream]), .primed_o(qctl_primed_o[qctl_stream]),
+				.done_o(qctl_done_o[qctl_stream]), .fault_o(qctl_fault_o[qctl_stream]),
+				.fault_code_o(qctl_fault_code_o[qctl_stream*4+:4])
 			);
-
-			// Each MXM stream Scheduler owns an independent local cycle counter.
 			always_ff @(posedge clk_i or negedge rst_ni) begin
-				if(!rst_ni)begin
-					qctl_scheduler_cycle_q[stream_index*32+:32] <= '0;
+				if(!rst_ni) qctl_scheduler_cycle_q[qctl_stream*32+:32] <= '0;
+				else if(program_reset_i || qctl_configure_valid_i[qctl_stream])begin
+					qctl_scheduler_cycle_q[qctl_stream*32+:32] <= '0;
 				end
-				else if(program_reset_i || qctl_configure_valid_i[stream_index])begin
-					qctl_scheduler_cycle_q[stream_index*32+:32] <= '0;
-				end
-				else begin
-					if(qctl_configured_o[stream_index] &&
-						qctl_scheduler_counter_ce[stream_index])begin
-						qctl_scheduler_cycle_q[stream_index*32+:32] <=
-							qctl_scheduler_cycle_q[stream_index*32+:32] + 1'b1;
-					end
+				else if(qctl_configured_o[qctl_stream] && qctl_scheduler_counter_ce[qctl_stream])begin
+					qctl_scheduler_cycle_q[qctl_stream*32+:32] <=
+						qctl_scheduler_cycle_q[qctl_stream*32+:32] + 1'b1;
 				end
 			end
 		end
 	endgenerate
-	assign frontends_ready_o = load_ready && dequant_ready && compute_ready;
-	assign frontends_idle_o = load_idle && dequant_idle && compute_idle &&
-		(load_queue_level == '0) && (dequant_queue_level == '0) && (compute_queue_level == '0);
-	assign frontend_fault_o = load_fault || dequant_fault || compute_fault ||
-		load_queue_fault || dequant_queue_fault || compute_queue_fault || coordinator_fault;
-	assign frontend_fault_code_o = load_fault ? load_fault_code :
-		(dequant_fault ? dequant_fault_code :
-		(compute_fault ? compute_fault_code :
-		((load_queue_fault || dequant_queue_fault || compute_queue_fault) ? 6'd5 :
-		(coordinator_fault ? {3'd0, coordinator_fault_code} : 6'd0))));
 
-	// Program writes target one of the three instruction streams owned by this MXM.
+	// Five Local iMEM Frontends share implementation, not storage or parser state.
+	generate
+		for(genvar frontend_stream = 0; frontend_stream < STREAM_COUNT; frontend_stream++)begin : gen_frontend
+			localparam integer TARGET_KIND = stream_target_kind(frontend_stream);
+			lpu_mxm_local_imem_frontend #(
+				.TARGET_KIND(TARGET_KIND), .IMEM_DEPTH(IMEM_DEPTH), .ACTIVE_CONTEXTS(ACTIVE_CONTEXTS)
+			) u_frontend (
+				.clk_i, .rst_ni, .program_reset_i, .clear_i(1'b0),
+				.load_valid_i(write_fire_w && (program_target_kind_w == TARGET_KIND)),
+				.load_ready_o(frontend_load_ready[frontend_stream]), .load_address_i(program_address_i),
+				.load_data_i(program_data_i), .load_strb_i(program_strb_i), .load_last_i(program_last_i),
+				.prime_valid_i(prime_fire_w && (program_target_kind_w == TARGET_KIND)),
+				.prime_ready_o(frontend_prime_ready[frontend_stream]),
+				.run_i(frontend_run[frontend_stream]),
+				.schedule_cycle_i(frontend_schedule_cycle[frontend_stream*32+:32]),
+				.issue_valid_o(frontend_issue_valid[frontend_stream]),
+				.issue_ready_i(frontend_issue_ready[frontend_stream]),
+				.issue_instruction_o(frontend_issue_instruction[frontend_stream*49+:49]),
+				.issue_cycle_o(frontend_issue_cycle[frontend_stream*32+:32]),
+				.configured_o(), .frontend_ready_o(frontend_ready[frontend_stream]),
+				.frontend_idle_o(frontend_idle[frontend_stream]),
+				.fault_o(frontend_fault[frontend_stream]),
+				.fault_code_o(frontend_fault_code[frontend_stream*6+:6])
+			);
+		end
+	endgenerate
+
+	// Program writes and PRIME commands terminate at exactly one selected Stream.
 	always_comb begin
-		case(program_target_kind_w)
-			PROGRAM_TARGET_MXM_LOAD: program_ready_o = program_control_i == PROGRAM_LOAD_PRIME ?
-				load_prime_ready : load_load_ready;
-			PROGRAM_TARGET_MXM_DEQUANT: program_ready_o = program_control_i == PROGRAM_LOAD_PRIME ?
-				dequant_prime_ready : dequant_load_ready;
-			PROGRAM_TARGET_MXM_COMPUTE: program_ready_o = program_control_i == PROGRAM_LOAD_PRIME ?
-				compute_prime_ready : compute_load_ready;
-			default: program_ready_o = 1'b1;
-		endcase
-		if(!destination_legal_w)begin
-			program_ready_o = 1'b1;
+		program_ready_o = 1'b1;
+		program_stream_index = MXM_QUEUE_LOAD;
+		if(destination_legal_w)begin
+			case(program_target_kind_w)
+				PROGRAM_TARGET_MXM_LOAD: program_stream_index = MXM_QUEUE_LOAD;
+				PROGRAM_TARGET_MXM_COMPUTE: program_stream_index = MXM_QUEUE_COMPUTE;
+				PROGRAM_TARGET_MXM_DEQUANT: program_stream_index = MXM_QUEUE_DEQUANT;
+				PROGRAM_TARGET_MXM_PARAM_LOAD: program_stream_index = MXM_QUEUE_PARAM_LOAD;
+				default: program_stream_index = MXM_QUEUE_BACKEND;
+			endcase
+			program_ready_o = program_control_i == PROGRAM_LOAD_PRIME ?
+				frontend_prime_ready[program_stream_index] : frontend_load_ready[program_stream_index];
 		end
 		program_error_o = program_valid_i && program_ready_o &&
-			(!destination_legal_w ||
-			 ((program_control_i == PROGRAM_LOAD_WRITE) &&
-			  ((program_strb_i != 4'b1111) || (program_address_i >= IMEM_DEPTH))));
+			(!destination_legal_w || ((program_control_i == PROGRAM_LOAD_WRITE) &&
+			((program_strb_i != 4'b1111) || (program_address_i >= IMEM_DEPTH))));
 	end
 
-	lpu_mxm_local_imem_frontend #(
-		.TARGET_KIND(PROGRAM_TARGET_MXM_LOAD),
-		.IMEM_DEPTH(IMEM_DEPTH),
-		.ACTIVE_CONTEXTS(ACTIVE_CONTEXTS)
-	) u_load_frontend (
-		.clk_i, .rst_ni, .program_reset_i, .clear_i(1'b0),
-		.load_valid_i(write_fire_w && (program_target_kind_w == PROGRAM_TARGET_MXM_LOAD)),
-		.load_ready_o(load_load_ready), .load_address_i(program_address_i),
-		.load_data_i(program_data_i), .load_strb_i(program_strb_i), .load_last_i(program_last_i),
-		.prime_valid_i(prime_fire_w && (program_target_kind_w == PROGRAM_TARGET_MXM_LOAD)),
-		.prime_ready_o(load_prime_ready), .run_i(frontend_run[0]),
-		.schedule_cycle_i(frontend_schedule_cycle[0*32+:32]), .issue_valid_o(load_frontend_valid), .issue_ready_i(load_frontend_ready),
-		.issue_instruction_o(load_frontend_instruction), .issue_cycle_o(load_frontend_cycle),
-		.configured_o(), .frontend_ready_o(load_ready), .frontend_idle_o(load_idle),
-		.fault_o(load_fault), .fault_code_o(load_fault_code)
+	assign frontends_ready_o = &frontend_ready;
+	assign frontends_idle_o = &frontend_idle;
+	assign frontend_fault_o = |frontend_fault;
+	always_comb begin
+		frontend_fault_code_o = '0;
+		for(fault_stream_index = 0; fault_stream_index < STREAM_COUNT; fault_stream_index = fault_stream_index + 1)begin
+			if(frontend_fault[fault_stream_index] && (frontend_fault_code_o == '0))begin
+				frontend_fault_code_o = frontend_fault_code[fault_stream_index*6+:6];
+			end
+		end
+	end
+
+	assign local_load_issue_valid_o = frontend_issue_valid[MXM_QUEUE_LOAD];
+	assign local_load_issue_instruction_o = frontend_issue_instruction[MXM_QUEUE_LOAD*49+:LOAD_INSTRUCTION_BITS];
+	assign local_load_issue_cycle_o = frontend_issue_cycle[MXM_QUEUE_LOAD*32+:32];
+	assign local_compute_issue_valid_o = frontend_issue_valid[MXM_QUEUE_COMPUTE];
+	assign local_compute_issue_instruction_o = frontend_issue_instruction[MXM_QUEUE_COMPUTE*49+:COMPUTE_INSTRUCTION_BITS];
+	assign local_compute_issue_cycle_o = frontend_issue_cycle[MXM_QUEUE_COMPUTE*32+:32];
+	assign local_dequant_issue_valid_o = frontend_issue_valid[MXM_QUEUE_DEQUANT];
+	assign local_dequant_issue_instruction_o = frontend_issue_instruction[MXM_QUEUE_DEQUANT*49+:DEQUANT_INSTRUCTION_BITS];
+	assign local_dequant_issue_cycle_o = frontend_issue_cycle[MXM_QUEUE_DEQUANT*32+:32];
+	assign local_param_load_issue_valid_o = frontend_issue_valid[MXM_QUEUE_PARAM_LOAD];
+	assign local_param_load_issue_instruction_o = frontend_issue_instruction[MXM_QUEUE_PARAM_LOAD*49+:PARAM_LOAD_INSTRUCTION_BITS];
+	assign local_param_load_issue_cycle_o = frontend_issue_cycle[MXM_QUEUE_PARAM_LOAD*32+:32];
+	assign local_backend_issue_valid_o = frontend_issue_valid[MXM_QUEUE_BACKEND];
+	assign local_backend_issue_instruction_o = frontend_issue_instruction[MXM_QUEUE_BACKEND*49+:lpu_mxm_backend_isa_pkg::BACKEND_INSTRUCTION_BITS];
+	assign local_backend_issue_cycle_o = frontend_issue_cycle[MXM_QUEUE_BACKEND*32+:32];
+
+	// Optional Load/Dequant pairing is atomic; unmatched deadlines raise Scheduler faults.
+	assign pair_mismatch_w = PAIR_LOAD_DEQUANT &&
+		(frontend_issue_valid[MXM_QUEUE_LOAD] ^ frontend_issue_valid[MXM_QUEUE_DEQUANT]);
+	assign frontend_issue_ready[MXM_QUEUE_LOAD] = PAIR_LOAD_DEQUANT ?
+		(frontend_issue_valid[MXM_QUEUE_DEQUANT] && load_core_ready && dequant_core_ready) : load_core_ready;
+	assign frontend_issue_ready[MXM_QUEUE_DEQUANT] = PAIR_LOAD_DEQUANT ?
+		(frontend_issue_valid[MXM_QUEUE_LOAD] && load_core_ready && dequant_core_ready) : dequant_core_ready;
+	assign frontend_issue_ready[MXM_QUEUE_COMPUTE] = compute_core_ready;
+	assign frontend_issue_ready[MXM_QUEUE_PARAM_LOAD] = param_core_ready;
+	assign frontend_issue_ready[MXM_QUEUE_BACKEND] = backend_core_ready;
+
+	// Existing 64-bit byte Streams feed the new Core without changing the network width.
+	always_comb begin
+		activation_valid = '0;
+		activation_data = '0;
+		weight_valid = '0;
+		weight_data = east_from_sxm_data_i;
+		for(data_row_index = 0; data_row_index < ROWS; data_row_index = data_row_index + 1)begin
+			activation_valid[data_row_index] = external_west_valid_i[data_row_index*32] &&
+				external_west_valid_i[data_row_index*32+1];
+			activation_data[data_row_index*TERMS*16+:TERMS*16] = {
+				external_west_data_i[(data_row_index*32+1)*64+:64],
+				external_west_data_i[(data_row_index*32)*64+:64]};
+			for(data_stream_index = 0; data_stream_index < WEIGHT_STREAMS; data_stream_index = data_stream_index + 1)begin
+				for(data_term_index = 0; data_term_index < TERMS; data_term_index = data_term_index + 1)begin
+					weight_valid[(data_row_index*WEIGHT_STREAMS+data_stream_index)*TERMS+data_term_index] =
+						east_from_sxm_valid_i[data_row_index*32+data_stream_index];
+				end
+			end
+		end
+	end
+
+	// Scheduler outputs enter the existing Instruction Waves through same-cycle bypasses.
+	lpu_mxm_core u_execution (
+		.clk_i, .rst_ni(frontend_rst_ni), .run_i(run_i),
+		.compute_enqueue_valid_i(frontend_issue_valid[MXM_QUEUE_COMPUTE]),
+		.compute_launch_i(frontend_issue_valid[MXM_QUEUE_COMPUTE]),
+		.compute_instruction_i(compute_instruction_t'(local_compute_issue_instruction_o)),
+		.compute_enqueue_ready_o(), .compute_launch_ready_o(compute_core_ready),
+		.load_enqueue_valid_i(frontend_issue_valid[MXM_QUEUE_LOAD]),
+		.load_launch_i(frontend_issue_valid[MXM_QUEUE_LOAD]),
+		.load_instruction_i(load_instruction_t'(local_load_issue_instruction_o)),
+		.load_enqueue_ready_o(), .load_launch_ready_o(load_core_ready),
+		.param_load_enqueue_valid_i(frontend_issue_valid[MXM_QUEUE_PARAM_LOAD]),
+		.param_load_launch_i(frontend_issue_valid[MXM_QUEUE_PARAM_LOAD]),
+		.param_load_instruction_i(param_load_instruction_t'(local_param_load_issue_instruction_o)),
+		.param_load_enqueue_ready_o(), .param_load_launch_ready_o(param_core_ready),
+		.dequant_enqueue_valid_i(frontend_issue_valid[MXM_QUEUE_DEQUANT]),
+		.dequant_launch_i(frontend_issue_valid[MXM_QUEUE_DEQUANT]),
+		.dequant_instruction_i(dequant_instruction_t'(local_dequant_issue_instruction_o)),
+		.dequant_enqueue_ready_o(), .dequant_launch_ready_o(dequant_core_ready),
+		.backend_enqueue_valid_i(frontend_issue_valid[MXM_QUEUE_BACKEND]),
+		.backend_launch_i(frontend_issue_valid[MXM_QUEUE_BACKEND]),
+		.backend_instruction_i(lpu_mxm_backend_isa_pkg::backend_instruction_t'(local_backend_issue_instruction_o)),
+		.backend_enqueue_ready_o(), .backend_launch_ready_o(backend_core_ready),
+		.activation_valid_i(activation_valid), .activation_i(activation_data),
+		.weight_stream_valid_i(weight_valid), .weight_stream_i(weight_data), .weight_stream_consume_o(),
+		.returned_valid_o(returned_valid), .returned_o(returned_data), .returned_tag_o(),
+		.param_load_row_valid_o(), .dequant_row_valid_o(), .param_load_row_instruction_o(),
+		.dequant_row_instruction_o(), .compute_row_valid_o(), .load_row_valid_o(),
+		.compute_row_instruction_o(), .load_row_instruction_o(), .compute_row_tag_o(), .load_row_index_o(),
+		.partial_valid_o(), .result_valid_o(), .result_bf16_o(), .partial_o(), .result_o(),
+		.partial_tag_o(), .result_address_o(), .result_tag_o(), .backend_slot_valid_o(),
+		.backend_slot_bf16_o(), .backend_slot_operation_o(), .backend_slot_address_o(),
+		.backend_issue_valid_o(), .backend_issue_bf16_o(), .backend_issue_address_o(),
+		.backend_issue_operation_o(), .alu_valid_o(), .operand_a_o(), .operand_b_o(),
+		.alu_address_o(), .alu_tag_o(), .cell_weight_valid_o(), .cell_weight_buffer_o(),
+		.cell_activation_valid_o(), .cell_activation_buffer_o(), .bank_request_valid_o(),
+		.bank_write_o(), .bank_address_o(), .frontend_fault_o(), .backend_fault_o(), .fault_o(core_fault)
 	);
 
-	lpu_mxm_local_imem_frontend #(
-		.TARGET_KIND(PROGRAM_TARGET_MXM_DEQUANT),
-		.IMEM_DEPTH(IMEM_DEPTH),
-		.ACTIVE_CONTEXTS(ACTIVE_CONTEXTS)
-	) u_dequant_frontend (
-		.clk_i, .rst_ni, .program_reset_i, .clear_i(1'b0),
-		.load_valid_i(write_fire_w && (program_target_kind_w == PROGRAM_TARGET_MXM_DEQUANT)),
-		.load_ready_o(dequant_load_ready), .load_address_i(program_address_i),
-		.load_data_i(program_data_i), .load_strb_i(program_strb_i), .load_last_i(program_last_i),
-		.prime_valid_i(prime_fire_w && (program_target_kind_w == PROGRAM_TARGET_MXM_DEQUANT)),
-		.prime_ready_o(dequant_prime_ready), .run_i(frontend_run[1]),
-		.schedule_cycle_i(frontend_schedule_cycle[1*32+:32]), .issue_valid_o(dequant_frontend_valid), .issue_ready_i(dequant_frontend_ready),
-		.issue_instruction_o(dequant_frontend_instruction), .issue_cycle_o(dequant_frontend_cycle),
-		.configured_o(), .frontend_ready_o(dequant_ready), .frontend_idle_o(dequant_idle),
-		.fault_o(dequant_fault), .fault_code_o(dequant_fault_code)
-	);
+	// Returned FP32 vectors occupy four 64-bit westbound Streams per Superlane.
+	always_comb begin
+		east_external_valid_o = '0;
+		east_external_data_o = '0;
+		west_to_sxm_valid_o = '0;
+		west_to_sxm_data_o = '0;
+		for(output_row_index = 0; output_row_index < ROWS; output_row_index = output_row_index + 1)begin
+			for(output_stream_index = 0; output_stream_index < 4; output_stream_index = output_stream_index + 1)begin
+				west_to_sxm_valid_o[output_row_index*32+output_stream_index] = returned_valid[output_row_index];
+				west_to_sxm_data_o[(output_row_index*32+output_stream_index)*64+:64] =
+					returned_data[output_row_index*OUTPUTS*32+output_stream_index*64+:64];
+			end
+		end
+	end
 
-	lpu_mxm_local_imem_frontend #(
-		.TARGET_KIND(PROGRAM_TARGET_MXM_COMPUTE),
-		.IMEM_DEPTH(IMEM_DEPTH),
-		.ACTIVE_CONTEXTS(ACTIVE_CONTEXTS)
-	) u_compute_frontend (
-		.clk_i, .rst_ni, .program_reset_i, .clear_i(1'b0),
-		.load_valid_i(write_fire_w && (program_target_kind_w == PROGRAM_TARGET_MXM_COMPUTE)),
-		.load_ready_o(compute_load_ready), .load_address_i(program_address_i),
-		.load_data_i(program_data_i), .load_strb_i(program_strb_i), .load_last_i(program_last_i),
-		.prime_valid_i(prime_fire_w && (program_target_kind_w == PROGRAM_TARGET_MXM_COMPUTE)),
-		.prime_ready_o(compute_prime_ready), .run_i(frontend_run[2]),
-		.schedule_cycle_i(frontend_schedule_cycle[2*32+:32]), .issue_valid_o(compute_frontend_valid), .issue_ready_i(compute_frontend_ready),
-		.issue_instruction_o(compute_frontend_instruction), .issue_cycle_o(compute_frontend_cycle),
-		.configured_o(), .frontend_ready_o(compute_ready), .frontend_idle_o(compute_idle),
-		.fault_o(compute_fault), .fault_code_o(compute_fault_code)
-	);
-
-	// Each MXM stream owns an independent Timed Queue at the Subsystem boundary.
-	lpu_mxm_issue_queue #(.INSTRUCTION_WIDTH(49), .DEPTH(FU_QUEUE_DEPTH)) u_load_timed_queue (
-		.clk_i, .rst_ni(frontend_rst_ni), .run_i(frontend_run[0]),
-		.schedule_cycle_i(frontend_schedule_cycle[0*32+:32]),
-		.enqueue_valid_i(load_frontend_valid), .enqueue_ready_o(load_frontend_ready),
-		.enqueue_instruction_i(load_frontend_instruction), .enqueue_cycle_i(load_frontend_cycle),
-		.issue_valid_o(load_source_valid), .issue_ready_i(load_source_ready),
-		.issue_instruction_o(load_source_instruction), .issue_cycle_o(load_source_cycle),
-		.level_o(load_queue_level), .fault_o(load_queue_fault)
-	);
-
-	lpu_mxm_issue_queue #(.INSTRUCTION_WIDTH(49), .DEPTH(FU_QUEUE_DEPTH)) u_dequant_timed_queue (
-		.clk_i, .rst_ni(frontend_rst_ni), .run_i(frontend_run[1]),
-		.schedule_cycle_i(frontend_schedule_cycle[1*32+:32]),
-		.enqueue_valid_i(dequant_frontend_valid), .enqueue_ready_o(dequant_frontend_ready),
-		.enqueue_instruction_i(dequant_frontend_instruction), .enqueue_cycle_i(dequant_frontend_cycle),
-		.issue_valid_o(dequant_source_valid), .issue_ready_i(dequant_source_ready),
-		.issue_instruction_o(dequant_source_instruction), .issue_cycle_o(dequant_source_cycle),
-		.level_o(dequant_queue_level), .fault_o(dequant_queue_fault)
-	);
-
-	lpu_mxm_issue_queue #(.INSTRUCTION_WIDTH(49), .DEPTH(FU_QUEUE_DEPTH)) u_compute_timed_queue (
-		.clk_i, .rst_ni(frontend_rst_ni), .run_i(frontend_run[2]),
-		.schedule_cycle_i(frontend_schedule_cycle[2*32+:32]),
-		.enqueue_valid_i(compute_frontend_valid), .enqueue_ready_o(compute_frontend_ready),
-		.enqueue_instruction_i(compute_frontend_instruction), .enqueue_cycle_i(compute_frontend_cycle),
-		.issue_valid_o(compute_source_valid), .issue_ready_i(compute_source_ready),
-		.issue_instruction_o(compute_source_instruction), .issue_cycle_o(compute_source_cycle),
-		.level_o(compute_queue_level), .fault_o(compute_queue_fault)
-	);
-
-	assign compute_width_violation_w = local_compute_issue_valid_o && local_compute_issue_instruction_o[48];
-
-	lpu_mxm_local_coordinator u_coordinator (
-		.clk_i, .rst_ni, .run_i(run_i && local_frontend_enable_i),
-		.pair_load_dequant_i(PAIR_LOAD_DEQUANT),
-		.load_schedule_cycle_i(frontend_schedule_cycle[0*32+:32]),
-		.dequant_schedule_cycle_i(frontend_schedule_cycle[1*32+:32]),
-		.compute_schedule_cycle_i(frontend_schedule_cycle[2*32+:32]),
-		.load_valid_i(load_source_valid), .load_ready_o(load_source_ready),
-		.load_instruction_i(load_source_instruction[28:0]), .load_cycle_i(load_source_cycle),
-		.dequant_valid_i(dequant_source_valid), .dequant_ready_o(dequant_source_ready),
-		.dequant_instruction_i(dequant_source_instruction[15:0]), .dequant_cycle_i(dequant_source_cycle),
-		.compute_valid_i(compute_source_valid), .compute_ready_o(compute_source_ready),
-		.compute_instruction_i(compute_source_instruction), .compute_cycle_i(compute_source_cycle),
-		.load_issue_valid_o(local_load_issue_valid_o), .load_issue_ready_i(1'b1),
-		.load_issue_instruction_o(local_load_issue_instruction_o), .load_issue_cycle_o(local_load_issue_cycle_o),
-		.dequant_issue_valid_o(local_dequant_issue_valid_o), .dequant_issue_ready_i(1'b1),
-		.dequant_issue_instruction_o(local_dequant_issue_instruction_o), .dequant_issue_cycle_o(local_dequant_issue_cycle_o),
-		.compute_issue_valid_o(local_compute_issue_valid_o), .compute_issue_ready_i(!compute_width_violation_w),
-		.compute_issue_instruction_o(local_compute_issue_instruction_o), .compute_issue_cycle_o(local_compute_issue_cycle_o),
-		.fault_o(coordinator_fault), .fault_code_o(coordinator_fault_code)
-	);
-
-	assign execution_load_valid = local_frontend_enable_i ? local_load_issue_valid_o : external_load_valid_i;
-	assign execution_load_instruction = local_frontend_enable_i ?
-		{{19{1'b0}}, local_load_issue_instruction_o} : external_load_instruction_i;
-	assign execution_dequant_valid = local_frontend_enable_i ?
-		local_dequant_issue_valid_o : external_dequant_valid_i;
-	assign execution_dequant_instruction = local_frontend_enable_i ?
-		local_dequant_issue_instruction_o : external_dequant_instruction_i;
-	assign execution_compute_valid = local_frontend_enable_i ?
-		(local_compute_issue_valid_o && !compute_width_violation_w) : external_compute_valid_i;
-	assign execution_compute_instruction = local_frontend_enable_i ?
-		local_compute_issue_instruction_o[47:0] : external_compute_instruction_i;
-
-	lpu_mxm_slice #(
-		.LOCAL_MXM_INDEX(LOCAL_MXM_INDEX),
-		.ACCUMULATOR_BLOCK_COUNT(ACCUMULATOR_BLOCK_COUNT)
-	) u_execution (
-		.clk_i, .rst_ni, .run_i,
-		.load_issue_valid_i(execution_load_valid), .load_issue_instruction_i(execution_load_instruction),
-		.dequant_issue_valid_i(execution_dequant_valid), .dequant_issue_instruction_i(execution_dequant_instruction),
-		.compute_issue_valid_i(execution_compute_valid), .compute_issue_instruction_i(execution_compute_instruction),
-		.east_from_sxm_valid_i, .east_from_sxm_data_i, .external_west_valid_i, .external_west_data_i,
-		.east_external_valid_o, .east_external_data_o, .west_to_sxm_valid_o, .west_to_sxm_data_o,
-		.fault_o, .conflict_o
-	);
+	assign fault_o = core_fault || frontend_fault_o || (|qctl_fault_o) || pair_mismatch_w;
+	assign conflict_o = pair_mismatch_w;
+	assign unused_external = external_load_valid_i ^ external_dequant_valid_i ^ external_compute_valid_i ^
+		(^external_load_instruction_i) ^ (^external_dequant_instruction_i) ^ (^external_compute_instruction_i);
 endmodule

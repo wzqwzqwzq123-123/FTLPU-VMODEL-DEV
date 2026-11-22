@@ -41,18 +41,25 @@ module lpu_mxm_backend #(
   import lpu_mxm_backend_isa_pkg::*;
   wire head_valid;
   wire [INSTRUCTION_BITS-1:0] head;
-  wire legal_head=backend_fields_legal(DEPTH,int'(head[2+:ADDRESS_BITS]),head[1:0],head[INSTRUCTION_BITS-1]);
-  wire pop=run_i && launch_i && head_valid;
+  wire queue_ready;
+  wire direct=launch_i && enqueue_valid_i && !head_valid;
+  wire [INSTRUCTION_BITS-1:0] launch_instruction=head_valid?head:instruction_i;
+  wire legal_launch=backend_fields_legal(DEPTH,int'(launch_instruction[2+:ADDRESS_BITS]),
+    launch_instruction[1:0],launch_instruction[INSTRUCTION_BITS-1]);
+  wire launch_fire=launch_i && launch_ready_o;
+  wire pop=launch_fire && head_valid;
+  wire queue_enqueue=enqueue_valid_i && !(direct && launch_ready_o);
   wire [COLS*INSTRUCTION_BITS-1:0] column_command;
   wire [COLS-1:0] column_fault;
   logic control_fault_q;
-  assign launch_ready_o=run_i && head_valid;
+  assign launch_ready_o=run_i && (head_valid || enqueue_valid_i) && legal_launch;
+  assign enqueue_ready_o=direct?launch_ready_o:queue_ready;
   lpu_mxm_command_queue #(.WIDTH(INSTRUCTION_BITS),.DEPTH(QUEUE_DEPTH)) u_queue (
-    .clk_i,.rst_ni,.enqueue_valid_i,.enqueue_ready_o,.enqueue_data_i(instruction_i),.pop_i(pop),.valid_o(head_valid),.data_o(head));
+    .clk_i,.rst_ni,.enqueue_valid_i(queue_enqueue),.enqueue_ready_o(queue_ready),.enqueue_data_i(instruction_i),.pop_i(pop),.valid_o(head_valid),.data_o(head));
   // Returned data and backend commands advance between Superlanes one cycle
   // apart, independently of the three-cycle frontend compute instruction wave.
   lpu_mxm_instruction_wave #(.WIDTH(INSTRUCTION_BITS),.ROWS(COLS),.INTERVAL(lpu_mxm_config_pkg::RESULT_SUPERLANE_INTERVAL)) u_wave (
-    .clk_i,.rst_ni,.run_i,.launch_i(pop && legal_head),.instruction_i(head),
+    .clk_i,.rst_ni,.run_i,.launch_i(launch_fire),.instruction_i(launch_instruction),
     .launch_ready_o(),.row_valid_o(issue_valid_o),.row_update_o(),
     .row_instruction_o(column_command));
   for(genvar c=0;c<COLS;c++) begin : g_column
@@ -79,7 +86,7 @@ module lpu_mxm_backend #(
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if(!rst_ni) control_fault_q<=0;
     else if(!run_i) control_fault_q<=0;
-    else if(launch_i && (!launch_ready_o || !legal_head)) control_fault_q<=1;
+    else if(launch_i && !launch_ready_o) control_fault_q<=1;
   end
   assign fault_o=control_fault_q || (|column_fault);
   initial if(DEPTH<2 || DEPTH%2!=0 || DEPTH>65536)

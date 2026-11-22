@@ -84,7 +84,7 @@ module lpu_program_distribute_relay #(
 	logic [PROGRAM_DESTINATION_WIDTH-1:0] head_destination_w;
 	logic [16:0] head_imem_address_w;
 	logic head_last_w;
-	logic [2:0] head_target_kind_w;
+	logic [PROGRAM_TARGET_KIND_WIDTH-1:0] head_target_kind_w;
 	logic [7:0] head_target_index_w;
 	logic [7:0] local_endpoint_bank_offset_w;
 
@@ -171,8 +171,11 @@ module lpu_program_distribute_relay #(
 		(head_target_index_w >= LOCAL_BANK_BASE) && (head_target_index_w < LOCAL_BANK_END);
 	assign next_relay_mem_w = (head_target_kind_w == PROGRAM_TARGET_MEM) &&
 		(head_target_index_w >= LOCAL_BANK_END) && (head_target_index_w < MEM_BANK_COUNT);
-	assign next_relay_peripheral_w = ((head_target_kind_w >= PROGRAM_TARGET_MXM_LOAD) &&
-		(head_target_kind_w <= PROGRAM_TARGET_MXM_COMPUTE)) ||
+	assign next_relay_peripheral_w = (head_target_kind_w == PROGRAM_TARGET_MXM_LOAD) ||
+		(head_target_kind_w == PROGRAM_TARGET_MXM_DEQUANT) ||
+		(head_target_kind_w == PROGRAM_TARGET_MXM_COMPUTE) ||
+		(head_target_kind_w == PROGRAM_TARGET_MXM_PARAM_LOAD) ||
+		(head_target_kind_w == PROGRAM_TARGET_MXM_BACKEND) ||
 		(head_target_kind_w == PROGRAM_TARGET_SXM_TRANSPOSE) ||
 		(head_target_kind_w == PROGRAM_TARGET_SXM_PERMUTE);
 	assign next_relay_route_w = !LAST_RELAY && (next_relay_mem_w || next_relay_peripheral_w);

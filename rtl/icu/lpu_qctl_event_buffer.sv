@@ -1,5 +1,5 @@
 module lpu_qctl_event_buffer #(
-	parameter integer QUEUE_COUNT = 220,
+	parameter integer QUEUE_COUNT = lpu_qctl_pkg::QCTL_QUEUE_COUNT,
 	parameter integer EVENT_DEPTH = 8,
 	parameter integer TAG_WIDTH = lpu_qctl_pkg::QCTL_OPERAND_WIDTH,
 	parameter integer EVENT_COUNT_WIDTH = $clog2(EVENT_DEPTH + 1),

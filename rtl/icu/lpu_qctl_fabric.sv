@@ -1,7 +1,7 @@
 // Runtime-only QCTL Fabric. Static Record distribution uses the independent
 // load-time Relay chains and never enters this module.
 module lpu_qctl_fabric #(
-	parameter integer QUEUE_COUNT = 220,
+	parameter integer QUEUE_COUNT = lpu_qctl_pkg::QCTL_QUEUE_COUNT,
 	parameter integer QUEUE_ID_WIDTH = QUEUE_COUNT <= 1 ? 1 : $clog2(QUEUE_COUNT)
 ) (
 	input logic clk_i,

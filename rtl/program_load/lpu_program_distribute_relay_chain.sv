@@ -88,7 +88,7 @@ module lpu_program_distribute_relay_chain #(
 	logic [RELAY_COUNT-1:0] relay_fault;
 	logic [RELAY_COUNT*6-1:0] relay_fault_code;
 
-	logic [2:0] tail_target_kind_w;
+	logic [PROGRAM_TARGET_KIND_WIDTH-1:0] tail_target_kind_w;
 	logic [7:0] tail_target_index_w;
 	logic tail_target_legal_w;
 	logic tail_target_illegal_w;
@@ -216,7 +216,9 @@ module lpu_program_distribute_relay_chain #(
 	assign tail_target_legal_w =
 		(((tail_target_kind_w == PROGRAM_TARGET_MXM_LOAD) ||
 		  (tail_target_kind_w == PROGRAM_TARGET_MXM_DEQUANT) ||
-		  (tail_target_kind_w == PROGRAM_TARGET_MXM_COMPUTE)) &&
+		  (tail_target_kind_w == PROGRAM_TARGET_MXM_COMPUTE) ||
+		  (tail_target_kind_w == PROGRAM_TARGET_MXM_PARAM_LOAD) ||
+		  (tail_target_kind_w == PROGRAM_TARGET_MXM_BACKEND)) &&
 		 (tail_target_index_w < MXM_INSTANCES_PER_HEMISPHERE)) ||
 		(((tail_target_kind_w == PROGRAM_TARGET_SXM_TRANSPOSE) ||
 		  (tail_target_kind_w == PROGRAM_TARGET_SXM_PERMUTE)) &&

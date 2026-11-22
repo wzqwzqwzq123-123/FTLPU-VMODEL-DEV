@@ -88,7 +88,7 @@ module lpu_program_load_system #(
 	localparam logic [5:0] FRONTEND_FAULT_OFFSET = 6'd16;
 
 	logic [1:0] command_scope_w;
-	logic [2:0] command_target_kind_w;
+	logic [PROGRAM_TARGET_KIND_WIDTH-1:0] command_target_kind_w;
 	logic [7:0] command_target_index_w;
 	logic [7:0] command_global_target_w;
 	logic command_target_legal_w;
@@ -101,6 +101,8 @@ module lpu_program_load_system #(
 	logic [3:0] mxm_load_target_seen_q;
 	logic [3:0] mxm_dequant_target_seen_q;
 	logic [3:0] mxm_compute_target_seen_q;
+	logic [3:0] mxm_param_load_target_seen_q;
+	logic [3:0] mxm_backend_target_seen_q;
 
 	logic instruction_load_done;
 	logic loader_program_start;
@@ -198,7 +200,9 @@ module lpu_program_load_system #(
 				command_target_index_w < lpu_pkg::MEM_BANKS_PER_HEMISPHERE;
 			PROGRAM_TARGET_MXM_LOAD,
 			PROGRAM_TARGET_MXM_DEQUANT,
-			PROGRAM_TARGET_MXM_COMPUTE: command_target_legal_w = command_target_index_w < 8'd2;
+			PROGRAM_TARGET_MXM_COMPUTE,
+			PROGRAM_TARGET_MXM_PARAM_LOAD,
+			PROGRAM_TARGET_MXM_BACKEND: command_target_legal_w = command_target_index_w < 8'd2;
 			default: command_target_legal_w = 1'b0;
 		endcase
 	end
@@ -215,7 +219,9 @@ module lpu_program_load_system #(
 			end
 			PROGRAM_TARGET_MXM_LOAD,
 			PROGRAM_TARGET_MXM_DEQUANT,
-			PROGRAM_TARGET_MXM_COMPUTE: begin
+			PROGRAM_TARGET_MXM_COMPUTE,
+			PROGRAM_TARGET_MXM_PARAM_LOAD,
+			PROGRAM_TARGET_MXM_BACKEND: begin
 				if(command_target_legal_w &&
 					program_cmd_write_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT] == PROGRAM_HEMISPHERE_WEST)begin
 					command_global_target_w = command_target_index_w + 8'd2;
@@ -239,7 +245,9 @@ module lpu_program_load_system #(
 		   ({1'b0, program_cmd_write_imem_base_address_i} + program_cmd_write_expected_word_count_i > MEM_IMEM_DEPTH))) ||
 		 (((command_target_kind_w == PROGRAM_TARGET_MXM_LOAD) ||
 		   (command_target_kind_w == PROGRAM_TARGET_MXM_DEQUANT) ||
-		   (command_target_kind_w == PROGRAM_TARGET_MXM_COMPUTE)) &&
+		   (command_target_kind_w == PROGRAM_TARGET_MXM_COMPUTE) ||
+		   (command_target_kind_w == PROGRAM_TARGET_MXM_PARAM_LOAD) ||
+		   (command_target_kind_w == PROGRAM_TARGET_MXM_BACKEND)) &&
 		  ((program_cmd_write_format_i != PROGRAM_FORMAT_128) ||
 		   ((program_cmd_write_byte_count_i % 16) != 0) ||
 		   (program_cmd_write_expected_word_count_i != program_cmd_write_byte_count_i / 16) ||
@@ -254,6 +262,8 @@ module lpu_program_load_system #(
 				PROGRAM_TARGET_MXM_LOAD: descriptor_duplicate_w = mxm_load_target_seen_q[command_global_target_w[1:0]];
 				PROGRAM_TARGET_MXM_DEQUANT: descriptor_duplicate_w = mxm_dequant_target_seen_q[command_global_target_w[1:0]];
 				PROGRAM_TARGET_MXM_COMPUTE: descriptor_duplicate_w = mxm_compute_target_seen_q[command_global_target_w[1:0]];
+				PROGRAM_TARGET_MXM_PARAM_LOAD: descriptor_duplicate_w = mxm_param_load_target_seen_q[command_global_target_w[1:0]];
+				PROGRAM_TARGET_MXM_BACKEND: descriptor_duplicate_w = mxm_backend_target_seen_q[command_global_target_w[1:0]];
 				default: descriptor_duplicate_w = 1'b0;
 			endcase
 		end
@@ -489,6 +499,8 @@ module lpu_program_load_system #(
 			mxm_load_target_seen_q <= '0;
 			mxm_dequant_target_seen_q <= '0;
 			mxm_compute_target_seen_q <= '0;
+			mxm_param_load_target_seen_q <= '0;
+			mxm_backend_target_seen_q <= '0;
 		end
 		else if(program_reset_i)begin
 			descriptor_fault_q <= 1'b0;
@@ -496,6 +508,8 @@ module lpu_program_load_system #(
 			mxm_load_target_seen_q <= '0;
 			mxm_dequant_target_seen_q <= '0;
 			mxm_compute_target_seen_q <= '0;
+			mxm_param_load_target_seen_q <= '0;
+			mxm_backend_target_seen_q <= '0;
 		end
 		else begin
 			if(descriptor_illegal_w || descriptor_duplicate_w)begin
@@ -508,6 +522,8 @@ module lpu_program_load_system #(
 					PROGRAM_TARGET_MXM_LOAD: mxm_load_target_seen_q[command_global_target_w[1:0]] <= 1'b1;
 					PROGRAM_TARGET_MXM_DEQUANT: mxm_dequant_target_seen_q[command_global_target_w[1:0]] <= 1'b1;
 					PROGRAM_TARGET_MXM_COMPUTE: mxm_compute_target_seen_q[command_global_target_w[1:0]] <= 1'b1;
+					PROGRAM_TARGET_MXM_PARAM_LOAD: mxm_param_load_target_seen_q[command_global_target_w[1:0]] <= 1'b1;
+					PROGRAM_TARGET_MXM_BACKEND: mxm_backend_target_seen_q[command_global_target_w[1:0]] <= 1'b1;
 					default: mem_target_seen_q <= mem_target_seen_q;
 				endcase
 			end

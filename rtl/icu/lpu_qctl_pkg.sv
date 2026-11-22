@@ -3,7 +3,7 @@ package lpu_qctl_pkg;
 	localparam integer QCTL_CYCLE_WIDTH = 32;
 	localparam integer QCTL_OPCODE_WIDTH = 4;
 	localparam integer QCTL_OPERAND_WIDTH = 32;
-	localparam integer QCTL_QUEUE_COUNT = 220;
+	localparam integer QCTL_QUEUE_COUNT = 228;
 	localparam integer QCTL_MEM_QUEUE_COUNT = 208;
 	localparam integer QCTL_MEM_QUEUES_PER_HEMISPHERE = 104;
 	localparam integer QCTL_RELAY_COUNT_PER_HEMISPHERE = 7;
@@ -12,9 +12,11 @@ package lpu_qctl_pkg;
 	localparam integer QCTL_MXM_LOAD_BASE = 208;
 	localparam integer QCTL_MXM_DEQUANT_BASE = 212;
 	localparam integer QCTL_MXM_COMPUTE_BASE = 216;
+	localparam integer QCTL_MXM_PARAM_LOAD_BASE = 220;
+	localparam integer QCTL_MXM_BACKEND_BASE = 224;
 	localparam integer QCTL_QUEUE_ID_WIDTH = 8;
 	localparam integer QCTL_RELAY_ID_WIDTH = 4;
-	localparam integer QCTL_LOCAL_QUEUE_ID_WIDTH = 4;
+	localparam integer QCTL_LOCAL_QUEUE_ID_WIDTH = 5;
 
 	// Runtime messages remain independent from the load-time Record Relay path.
 	typedef enum logic [3:0] {
@@ -57,7 +59,7 @@ package lpu_qctl_pkg;
 		qctl_record_operand = record[95:64];
 	endfunction
 
-	// Queue IDs 0..207 are MEM Banks; the three four-entry MXM ranges follow.
+	// Queue IDs 0..207 are MEM Banks; the five four-entry MXM ranges follow.
 	function automatic logic qctl_queue_valid(input logic [QCTL_QUEUE_ID_WIDTH-1:0] queue_id);
 		qctl_queue_valid = queue_id < QCTL_QUEUE_COUNT;
 	endfunction
@@ -76,8 +78,14 @@ package lpu_qctl_pkg;
 				else if(queue_id < QCTL_MXM_COMPUTE_BASE)begin
 					mxm_index = queue_id - QCTL_MXM_DEQUANT_BASE;
 				end
-				else begin
+				else if(queue_id < QCTL_MXM_PARAM_LOAD_BASE)begin
 					mxm_index = queue_id - QCTL_MXM_COMPUTE_BASE;
+				end
+				else if(queue_id < QCTL_MXM_BACKEND_BASE)begin
+					mxm_index = queue_id - QCTL_MXM_PARAM_LOAD_BASE;
+				end
+				else begin
+					mxm_index = queue_id - QCTL_MXM_BACKEND_BASE;
 				end
 				qctl_queue_hemisphere = mxm_index >= 2;
 			end
@@ -98,7 +106,7 @@ package lpu_qctl_pkg;
 		end
 	endfunction
 
-	// R0..R5 own sixteen MEM Queues; R6 owns eight MEM Queues and six MXM streams.
+	// R0..R5 own sixteen MEM Queues; R6 owns eight MEM Queues and ten MXM streams.
 	function automatic logic [QCTL_LOCAL_QUEUE_ID_WIDTH-1:0] qctl_queue_local_index(
 		input logic [QCTL_QUEUE_ID_WIDTH-1:0] queue_id
 	);
@@ -119,11 +127,19 @@ package lpu_qctl_pkg;
 					mxm_index = queue_id - QCTL_MXM_DEQUANT_BASE;
 					stream_index = 1;
 				end
-				else begin
+				else if(queue_id < QCTL_MXM_PARAM_LOAD_BASE)begin
 					mxm_index = queue_id - QCTL_MXM_COMPUTE_BASE;
 					stream_index = 2;
 				end
-				qctl_queue_local_index = 8 + (mxm_index % 2) * 3 + stream_index;
+				else if(queue_id < QCTL_MXM_BACKEND_BASE)begin
+					mxm_index = queue_id - QCTL_MXM_PARAM_LOAD_BASE;
+					stream_index = 3;
+				end
+				else begin
+					mxm_index = queue_id - QCTL_MXM_BACKEND_BASE;
+					stream_index = 4;
+				end
+				qctl_queue_local_index = 8 + (mxm_index % 2) * 5 + stream_index;
 			end
 		end
 	endfunction

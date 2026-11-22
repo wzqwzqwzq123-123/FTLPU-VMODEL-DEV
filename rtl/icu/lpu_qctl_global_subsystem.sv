@@ -1,6 +1,6 @@
 module lpu_qctl_global_subsystem #(
 	parameter integer TOTAL_CAPACITY = 512,
-	parameter integer QUEUE_COUNT = 220,
+	parameter integer QUEUE_COUNT = lpu_qctl_pkg::QCTL_QUEUE_COUNT,
 	parameter integer QUEUE_ENTRY_LIMIT = 16,
 	parameter integer EVENT_DEPTH = 8,
 	parameter integer REGION_DEPTH = 64,
@@ -123,7 +123,8 @@ module lpu_qctl_global_subsystem #(
 
 	initial begin
 		if(QUEUE_COUNT != lpu_qctl_pkg::QCTL_QUEUE_COUNT)begin
-			$error("Formal distributed QCTL mapping currently requires exactly 220 Queues");
+			$error("Formal distributed QCTL mapping requires exactly %0d Queues",
+				lpu_qctl_pkg::QCTL_QUEUE_COUNT);
 		end
 	end
 

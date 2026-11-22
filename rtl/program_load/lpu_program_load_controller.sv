@@ -55,7 +55,8 @@ module lpu_program_load_controller #(
 );
 	import lpu_program_load_pkg::*;
 
-	localparam integer COMMAND_RECORD_WIDTH = 150 + COMMAND_ADDRESS_WIDTH;
+	localparam integer COMMAND_RECORD_WIDTH = 138 +
+		lpu_program_load_pkg::PROGRAM_DESTINATION_WIDTH + COMMAND_ADDRESS_WIDTH;
 
 	logic [COMMAND_RECORD_WIDTH-1:0] command_mem_q [0:COMMAND_DEPTH-1];
 	logic [COMMAND_RECORD_WIDTH-1:0] program_cmd_write_record_w;

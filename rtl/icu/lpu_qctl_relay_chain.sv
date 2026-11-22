@@ -3,8 +3,8 @@
 module lpu_qctl_relay_chain #(
 	parameter integer HEMISPHERE_ID = 0,
 	parameter integer RELAY_COUNT = 7,
-	parameter integer QUEUE_COUNT = 220,
-	parameter integer LOCAL_QUEUE_COUNT = 16,
+	parameter integer QUEUE_COUNT = lpu_qctl_pkg::QCTL_QUEUE_COUNT,
+	parameter integer LOCAL_QUEUE_COUNT = 18,
 	parameter integer REGION_DEPTH = 64,
 	parameter integer BUFFER_DEPTH = 2,
 	parameter integer QUEUE_ENTRY_LIMIT = 16,

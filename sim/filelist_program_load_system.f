@@ -2,16 +2,19 @@ rtl/core/lpu_pkg.sv
 rtl/program_load/lpu_program_load_pkg.sv
 rtl/icu/lpu_qctl_pkg.sv
 rtl/core/lpu_native_config_pkg.sv
-rtl/queue/lpu_queue_fifo.sv
+rtl/common/lpu_fifo.sv
+rtl/common/lpu_sram.sv
 rtl/core/lpu_schedule_clock.sv
 -f sim/filelist_rtl_core.f
 
-rtl/icu/lpu_qctl_shared_pool.sv
-rtl/icu/lpu_qctl_queue_cache.sv
+rtl/icu/lpu_qctl_load_manager.sv
+rtl/icu/lpu_qctl_relay.sv
+rtl/icu/lpu_qctl_relay_chain.sv
 rtl/icu/lpu_qctl_controller.sv
-rtl/icu/lpu_qctl_sync_fabric.sv
+rtl/icu/lpu_qctl_endpoint.sv
 rtl/icu/lpu_qctl_event_buffer.sv
-rtl/icu/lpu_qctl_system.sv
+rtl/icu/lpu_qctl_fabric.sv
+rtl/icu/lpu_qctl_global_subsystem.sv
 
 rtl/program_load/lpu_program_load_controller.sv
 rtl/program_load/lpu_program_load_config_fifo.sv
@@ -50,21 +53,12 @@ rtl/integration/lpu_mem_command_adapter.sv
 rtl/integration/lpu_mem_srf_command_integration.sv
 rtl/mem/lpu_mem_subsystem.sv
 
-rtl/mxm/lpu_mxm_local_imem.sv
-rtl/mxm/lpu_mxm_imem_fetch.sv
-rtl/mxm/lpu_mxm_macro_decoder_core.sv
-rtl/mxm/lpu_mxm_load_macro_decoder.sv
-rtl/mxm/lpu_mxm_load_macro_scheduler.sv
-rtl/mxm/lpu_mxm_load_macro_frontend.sv
-rtl/mxm/lpu_mxm_dequant_macro_decoder.sv
-rtl/mxm/lpu_mxm_dequant_macro_scheduler.sv
-rtl/mxm/lpu_mxm_dequant_macro_frontend.sv
-rtl/mxm/lpu_mxm_compute_macro_decoder.sv
-rtl/mxm/lpu_mxm_compute_macro_scheduler.sv
-rtl/mxm/lpu_mxm_compute_macro_frontend.sv
-rtl/mxm/lpu_mxm_local_imem_frontend.sv
-rtl/mxm/lpu_mxm_issue_queue.sv
-rtl/mxm/lpu_mxm_local_coordinator.sv
+rtl/mxm/icu/lpu_mxm_local_imem.sv
+rtl/mxm/icu/lpu_mxm_imem_fetch.sv
+rtl/mxm/icu/lpu_mxm_macro_decoder_core.sv
+rtl/mxm/icu/lpu_mxm_macro_scheduler_core.sv
+rtl/mxm/icu/lpu_mxm_macro_frontend.sv
+rtl/mxm/icu/lpu_mxm_local_imem_frontend.sv
 rtl/mxm/lpu_mxm_subsystem.sv
 
 rtl/sxm/lpu_sxm_subsystem.sv
