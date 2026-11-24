@@ -449,29 +449,17 @@ module lpu_fu_subsystem_cluster #(
 				.conflict_o(mem_stream_conflict)
 			);
 
-			lpu_sxm_subsystem u_sxm_subsystem (
-				.clk_i, .rst_ni, .run_i(execution_run),
-				.program_valid_i(sxm_program_valid_i[HEMISPHERE_INDEX]),
-				.program_ready_o(sxm_program_ready_o[HEMISPHERE_INDEX]),
-				.program_control_i(outer_program_control_i[
-					HEMISPHERE_INDEX*PROGRAM_LOAD_CONTROL_WIDTH+:PROGRAM_LOAD_CONTROL_WIDTH]),
-				.program_destination_i(outer_program_destination_i[
-					HEMISPHERE_INDEX*PROGRAM_DESTINATION_WIDTH+:PROGRAM_DESTINATION_WIDTH]),
-				.program_address_i(outer_program_address_i[HEMISPHERE_INDEX*17+:17]),
-				.program_data_i(outer_program_data_i[HEMISPHERE_INDEX*128+:128]),
-				.program_strb_i(outer_program_strb_i[HEMISPHERE_INDEX*4+:4]),
-				.program_last_i(outer_program_last_i[HEMISPHERE_INDEX]),
-				.program_error_o(sxm_program_error_o[HEMISPHERE_INDEX]),
-				.transpose_issue_valid_i(1'b0),
-				.transpose_issue_instruction_i('0),
-				.permute_issue_valid_i(1'b0),
-				.permute_issue_instruction_i('0),
-				.east_inner_valid_i(mem_east_valid), .east_inner_data_i(mem_east_data),
-				.east_outer_valid_o(sxm_east_valid), .east_outer_data_o(sxm_east_data),
-				.west_outer_valid_i(mxm_west_valid), .west_outer_data_i(mxm_west_data),
-				.west_inner_valid_o(sxm_west_valid), .west_inner_data_o(sxm_west_data),
-				.fault_o(sxm_fault), .conflict_o(sxm_stream_conflict)
-			);
+			// SXM instruction loading remains disabled until its local control contract is defined.
+			assign sxm_program_ready_o[HEMISPHERE_INDEX] = 1'b0;
+			assign sxm_program_error_o[HEMISPHERE_INDEX] = 1'b0;
+
+			// The formal cluster bypasses the removed legacy SXM path without changing FU ordering.
+			assign sxm_east_valid = mem_east_valid;
+			assign sxm_east_data = mem_east_data;
+			assign sxm_west_valid = mxm_west_valid;
+			assign sxm_west_data = mxm_west_data;
+			assign sxm_fault = 1'b0;
+			assign sxm_stream_conflict = 1'b0;
 			for(genvar local_mxm_gen = 0; local_mxm_gen < 2; local_mxm_gen = local_mxm_gen + 1)begin : gen_mxm
 				localparam integer MXM_INDEX = HEMISPHERE_INDEX*2 + local_mxm_gen;
 				lpu_mxm_subsystem #(
