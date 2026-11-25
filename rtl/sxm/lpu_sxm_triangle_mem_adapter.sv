@@ -41,9 +41,11 @@ module lpu_sxm_triangle_mem_adapter #(
 	reg [15:0] matrices_q;
 	reg [14:0] base_q;
 	reg [31:0] age_q;
+	// inverse_q[d] gives the INPUT block row / logical OUTPUT block column mapped to physical destination Tile d (0..T-1).
 	reg [T*TW-1:0] inverse_q;
 	reg [T*TW-1:0] inverse_now;
 	reg legal_map;
+	// ma/mb are INPUT block-row / logical OUTPUT block-column positions (0..T-1), not element row/column indices.
 	integer ma, mb;
 
 	// Invert the Tile permutation and reject duplicate or out-of-range destinations.
@@ -55,6 +57,7 @@ module lpu_sxm_triangle_mem_adapter #(
 				legal_map = 0;
 			end
 			else begin
+				// tile_map_i packs [logical Tile][TW-bit destination]; inverse_now packs [physical Tile][TW-bit logical position].
 				inverse_now[int'(tile_map_i[ma*TW+:TW])*TW+:TW] = TW'(ma);
 			end
 			for(mb = 0; mb < ma; mb = mb + 1)begin
@@ -74,6 +77,8 @@ module lpu_sxm_triangle_mem_adapter #(
 	reg bad_now;
 	// Match incoming blocks to their statically scheduled age, format and matrix/column tags.
 	always @* begin
+		// d is a physical output Tile; k is the eight-cycle output epoch, starting at age 8.
+		// n=k-inverse_q[d] is this Tile's flat output-block id: matrix=n/T; n%T is the INPUT block column (transposed OUTPUT block row).
 		integer d, k, n;
 		reg expected_block;
 		block_ready_o = 0;
@@ -103,6 +108,8 @@ module lpu_sxm_triangle_mem_adapter #(
 		end
 	end
 
+	// d selects an OUTPUT Tile, st its outgoing byte Stream (0..31), and l the Lane within that Stream (0..7).
+	// block_data_i packs [Tile][OUTPUT block row 0..7][OUTPUT Lane/column 0..7][32-bit element].
 	// Pack each block into fixed byte destinations; FP32 uses 32 Streams and BF16 uses 16.
 	always @* begin
 		integer d, st, l;
@@ -113,9 +120,12 @@ module lpu_sxm_triangle_mem_adapter #(
 				stream_valid_o[d*32+st] = block_valid_i[d] && block_ready_o[d] && (fp32_q || st < 16);
 				for(l = 0; l < 8; l = l + 1)begin
 					if(fp32_q)begin
+						// st/4 selects the output block row, st%4 its element byte; input bit base=d*2048+((row*8+l)*32)+byte*8.
+						// Stream output base=(d*32+st)*64+l*8: 32 Streams/Tile, 64=8 Lanes*8 bits/Stream; +:8 selects one byte.
 						stream_data_o[(d*32+st)*64+l*8+:8] = block_data_i[d*2048+((st/4)*8+l)*32+(st%4)*8+:8];
 					end
 					else if(st < 16)begin
+						// BF16 uses row=st/2 and byte=st%2; the upper half of each 32-bit element container is not transmitted.
 						stream_data_o[(d*32+st)*64+l*8+:8] = block_data_i[d*2048+((st/2)*8+l)*32+(st%2)*8+:8];
 					end
 				end
@@ -128,6 +138,9 @@ module lpu_sxm_triangle_mem_adapter #(
 
 	// Offset each group's command launch by its native MEM hop to align with arriving SRF data.
 	always @* begin
+		// g is MEM group 0..3, d a physical output Tile, b the group's local bank/Stream position 0..7.
+		// delta is elapsed cycles from this group's Tile-adjusted launch origin; k=delta/8 is an output epoch.
+		// n is a flat block id (matrix*T + INPUT block column / transposed OUTPUT block row); bytes_per_element activates 2/4 groups.
 		integer g, d, b, delta, k, n, bytes_per_element;
 		mem_issue_valid_o = 0;
 		mem_issue_o = 0;
@@ -144,6 +157,8 @@ module lpu_sxm_triangle_mem_adapter #(
 						n = k - int'(inverse_q[d*TW+:TW]);
 						if(n >= 0 && n < int'(matrices_q)*T)begin
 							for(b = 0; b < 8; b = b + 1)begin
+								// Flat command slot=g*8+b selects one of 32 commands; slot*32 is a BIT offset, not an SRAM address.
+								// Command Stream id is g*8+b; SRAM row address is base_q+n, packed starting at command bit 15.
 								mem_issue_valid_o[g*8+b] = 1;
 								mem_issue_o[(g*8+b)*32+:32] = 32'h80000101 | (32'(g*8+b) << 3) | ((32'(base_q)+32'(n)) << 15);
 							end
@@ -156,6 +171,8 @@ module lpu_sxm_triangle_mem_adapter #(
 
 	// Predict the target tap/address at the shared observation age, without the command hop offset.
 	always @* begin
+		// g selects MEM group 0..3 and d its target physical Tile; these are not element row/column indices.
+		// delta/k/n use the tap-observation origin here; n/T is the matrix id and n%T the INPUT block column / OUTPUT block row.
 		integer g, d, delta, k, n, bytes_per_element;
 		target_tap_o = 0;
 		target_address_o = 0;
@@ -171,6 +188,7 @@ module lpu_sxm_triangle_mem_adapter #(
 						k = delta/8;
 						n = k - int'(inverse_q[d*TW+:TW]);
 						if(n >= 0 && n < int'(matrices_q)*T)begin
+							// target_tap_o packs [group][Tile]; target_address_o adds a 15-bit SRAM row address per entry.
 							target_tap_o[g*T+d] = 1;
 							target_address_o[(g*T+d)*15+:15] = base_q + 15'(n);
 						end

@@ -13,11 +13,16 @@ module lpu_sxm_subsystem #(
 	input logic [1:0] batch_mode_i,
 	input logic [1:0] batch_dtype_i,
 	input logic [15:0] batch_count_i,
+	// Lane map packs [physical destination Tile][output Lane 0..7][3-bit input row/Lane selector].
+	// Tile map packs [INPUT block row / logical OUTPUT block column][TILE_INDEX_WIDTH-bit physical destination Tile].
 	input logic [T*24-1:0] batch_lane_map_i,
 	input logic [T*TILE_INDEX_WIDTH-1:0] batch_tile_map_i,
 	output logic batch_ready_o,
 	output logic batch_fault_o,
 
+	// cap_valid/lane_valid use [source Tile] / [source Tile][input Lane]; only 8*32 low bits of each 2048-bit capture slice are read.
+	// Output blocks pack [physical destination Tile][output block row 0..7][output Lane/column 0..7][32-bit element].
+	// block_matrix identifies the batch matrix; block_column retains the INPUT block-column id (OUTPUT block row after transpose).
 	// Capture rows into Triangle storage and expose the transformed blocks consumed by the writer.
 	input logic [T-1:0] batch_cap_valid_i,
 	input logic [T*8-1:0] batch_lane_valid_i,
@@ -30,6 +35,9 @@ module lpu_sxm_subsystem #(
 	output logic [T*16-1:0] batch_block_matrix_o,
 	output logic [T*TILE_INDEX_WIDTH-1:0] batch_block_column_o,
 
+	// Streams pack [physical output Tile][Stream 0..31][Lane 0..7][8-bit byte], giving 64 bits/Stream.
+	// Commands pack [MEM group 0..3][bank 0..7][32-bit command]; targets pack [group][Tile][15-bit address].
+	// Tap-valid/sample indices are (group*8+bank)*T+Tile; these are hardware endpoints, not matrix coordinates.
 	// Native MEM/SRF status gates admission and confirms actual tap samples.
 	input logic resources_ready_i,
 	input logic [14:0] base_i,

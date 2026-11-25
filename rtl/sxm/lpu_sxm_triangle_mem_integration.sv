@@ -35,6 +35,8 @@ module lpu_sxm_triangle_mem_integration #(
 	output wire fault_o,
 	output wire [32*T-1:0] tap_sample_o
 );
+	// SC counts [direction][fabric column][Tile][Stream] state entries; IC adds 2 endpoint slots per entry.
+	// MC=2 directions*32 Streams*T Tiles is one MEM group's boundary-state entry count; data adds 64 bits/entry.
 	localparam integer SC = 2*FABRIC_COLUMNS*T*32, IC = SC*2, MC = 64*T;
 
 	// Triangle block metadata and the subsystem's native byte-stream/command outputs.
@@ -51,7 +53,9 @@ module lpu_sxm_triangle_mem_integration #(
 	wire [4*T*15-1:0] target_addr;
 	wire pending_q, bad_q;
 
-	// SRF state is indexed by direction, column, Tile and Stream; injection adds a producer slot.
+	// SRF state bit index=((dir*FABRIC_COLUMNS+column)*T+Tile)*32+Stream; data appends [Lane][byte bit].
+	// dir=0 is East/increasing-column flow, dir=1 West/decreasing-column flow, not a hemisphere id.
+	// Each data entry has 64=8 Lanes*8 bits; injection/consumption insert a 2-slot endpoint dimension before Stream.
 	wire [SC-1:0] state_v;
 	wire [SC*64-1:0] state_d;
 	wire [2*T*32*64-1:0] boundary_zero;
@@ -59,6 +63,8 @@ module lpu_sxm_triangle_mem_integration #(
 	reg [IC*64-1:0] inject_d;
 	wire [2*FABRIC_COLUMNS*T-1:0] collision, invalid_consume;
 
+	// MEM boundaries pack [group 0..3][direction 0..1][Stream 0..31][Tile 0..T-1], unlike SRF's Tile-before-Stream order.
+	// Native MEM injection buses pack [group][bank 0..7][Tile]; md/mis add a 64-bit payload/5-bit Stream id per entry.
 	// Each MEM group exposes both boundary states and its native consumption/injection endpoints.
 	wire [4*MC-1:0] mlv, mrv, mlc, mrc;
 	wire [4*MC*64-1:0] mld, mrd;
@@ -72,31 +78,40 @@ module lpu_sxm_triangle_mem_integration #(
 	// Writer traffic owns the command buses throughout its scheduled activity window.
 	wire [31:0] mi = writer_busy ? wi : read_issue_valid_i;
 	wire [1023:0] mcmd = writer_busy ? wc : read_issue_i;
+	// z is a flat boundary [direction][Tile][Stream] entry; z*64 is the bit base of its eight-Lane byte segment.
 	for(genvar z = 0; z < 2*T*32; z = z + 1)begin
 		assign boundary_zero[z*64+:64] = 64'b0;
 	end
 
+	// t selects a physical Tile; b in g_read is the full Stream index (0..31), not a MEM-local bank id.
 	// Expand capture rows to the existing core port and observe readback after the four MEM groups.
 	for(genvar t = 0; t < T; t = t + 1)begin : g_tiles
+		// Capture base=t*256 (8 input Lanes*32 bits); the core allocates 2048 bits/Tile but reads only the low row.
 		assign cap_wide[t*2048+:2048] = {1792'b0, cap_data_i[t*256+:256]};
 		for(genvar b = 0; b < 32; b = b + 1)begin : g_read
+			// FABRIC_COLUMNS+MEM_LEFT-3 selects West flow at the last MEM column; multiply the state index by 64 for data bits.
 			assign read_valid_o[t*32+b] = state_v[((FABRIC_COLUMNS+MEM_LEFT-3)*T+t)*32+b];
 			assign read_data_o[(t*32+b)*64+:64] = state_d[(((FABRIC_COLUMNS+MEM_LEFT-3)*T+t)*32+b)*64+:64];
 		end
 	end
 
+	// g selects MEM group 0..3, t a physical Tile, st Stream 0..31, and dir the propagation direction.
 	// Group g occupies MEM_LEFT-g; its right boundary supplies the assigned WriteTap data.
 	for(genvar g = 0; g < 4; g = g + 1)begin : g_mem
 		for(genvar t = 0; t < T; t = t + 1)begin : g_tile
 			for(genvar st = 0; st < 32; st = st + 1)begin
 				for(genvar dir = 0; dir < 2; dir = dir + 1)begin : g_state
+					// Convert SRF [dir][column][Tile][Stream] to MEM [group][dir][Stream][Tile]; +1 selects the right boundary column.
+					// mld/mrd and state_d use the same entry coordinates as valid, with an additional *64 bit stride.
 					assign mlv[g*MC+(dir*32+st)*T+t] = state_v[((dir*FABRIC_COLUMNS+MEM_LEFT-g)*T+t)*32+st];
 					assign mrv[g*MC+(dir*32+st)*T+t] = state_v[((dir*FABRIC_COLUMNS+MEM_LEFT-g+1)*T+t)*32+st];
 					assign mld[(g*MC+(dir*32+st)*T+t)*64+:64] = state_d[(((dir*FABRIC_COLUMNS+MEM_LEFT-g)*T+t)*32+st)*64+:64];
 					assign mrd[(g*MC+(dir*32+st)*T+t)*64+:64] = state_d[(((dir*FABRIC_COLUMNS+MEM_LEFT-g+1)*T+t)*32+st)*64+:64];
 				end
 			end
+			// b here is MEM-local bank/Stream position 0..7; the selected global Stream is g*8+b on West flow.
 			for(genvar b = 0; b < 8; b = b + 1)begin : g_tap
+				// Tap index=(group*8+bank)*T+Tile; the +32 boundary offset chooses direction 1.
 				assign tap_data_valid[(g*8+b)*T+t] = mrv[g*MC+(32+g*8+b)*T+t];
 			end
 		end
@@ -184,6 +199,10 @@ module lpu_sxm_triangle_mem_integration #(
 		.monitor_bad_o(monitor_bad)
 	);
 
+	// g=MEM group, t=physical Tile, st=full Stream id; b is 0..31 for readback, 0..7 for group-local taps.
+	// p flattens [bank][Tile] as bank*T+Tile; cell_index=(dir*32+st)*T+t indexes one MEM boundary.
+	// slot=(((dir*FABRIC_COLUMNS+column)*T+t)*2+endpoint)*32+st; data bit base=slot*64.
+	// Endpoint 0 carries SXM injection/tap consumption; endpoint 1 carries native MEM consumption.
 	integer t, b, dir, st, cell_index, slot, p, g;
 	// Compose SRF producers and consumers in the original overwrite order for shared endpoints.
 	always @* begin
@@ -199,11 +218,13 @@ module lpu_sxm_triangle_mem_integration #(
 		// Inject SXM byte streams upstream of the four MEM groups and consume the readback boundary.
 		for(t = 0; t < T; t = t + 1)begin
 			for(st = 0; st < 32; st = st + 1)begin
+				// West flow (dir=1), column MEM_LEFT+2, producer slot 0; (t*32+st)*64 selects its source byte segment.
 				slot = (((FABRIC_COLUMNS+MEM_LEFT+2)*T+t)*2)*32+st;
 				inject_v[slot] = sv[t*32+st];
 				inject_d[slot*64+:64] = sd[(t*32+st)*64+:64];
 			end
 			for(b = 0; b < 32; b = b + 1)begin
+				// Readback consumes endpoint 0 at West-flow column MEM_LEFT-3; b denotes the full Stream id here.
 				slot = (((FABRIC_COLUMNS+MEM_LEFT-3)*T+t)*2)*32+b;
 				consume[slot] = read_valid_o[t*32+b];
 			end
@@ -213,6 +234,7 @@ module lpu_sxm_triangle_mem_integration #(
 			for(t = 0; t < T; t = t + 1)begin
 				// WriteTap preserves data; consume each Stream only at its assigned MEM group.
 				for(b = 0; b < 8; b = b + 1)begin
+					// st=g*8+b converts MEM group/local bank to the global byte Stream; Tile t is unchanged.
 					st = g*8+b;
 					slot = (((FABRIC_COLUMNS+MEM_LEFT-g+1)*T+t)*2)*32+st;
 					consume[slot] = pending_q && mrv[g*MC+(32+st)*T+t];
@@ -232,9 +254,11 @@ module lpu_sxm_triangle_mem_integration #(
 			// Native read results use the group's selected left/right injection boundary.
 			for(p = 0; p < 8*T; p = p + 1)begin
 				if(mli[g*8*T+p] || mri[g*8*T+p])begin
+					// p%T recovers Tile, p/T the local bank; mid supplies flow direction and mis supplies global Stream id.
 					t = p%T;
 					dir = int'(mid[g*8*T+p]);
 					st = int'(mis[(g*8*T+p)*5+:5]);
+					// mli selects column MEM_LEFT-g, otherwise its right neighbor; producer slot 0 carries this 64-bit segment.
 					slot = (((dir*FABRIC_COLUMNS+MEM_LEFT-g+(mli[g*8*T+p] ? 0 : 1))*T+t)*2)*32+st;
 					inject_v[slot] = 1;
 					inject_d[slot*64+:64] = md[(g*8*T+p)*64+:64];
