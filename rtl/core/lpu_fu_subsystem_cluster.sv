@@ -145,6 +145,7 @@ module lpu_fu_subsystem_cluster #(
 	logic [1:0] mem_frontend_fault;
 	logic [11:0] mem_frontend_fault_code;
 
+	logic [1:0] sxm_frontends_ready, sxm_frontends_idle, sxm_frontend_fault;
 	logic [3:0] mxm_frontends_ready;
 	logic [3:0] mxm_frontends_idle;
 	logic [3:0] mxm_frontend_fault;
@@ -191,13 +192,13 @@ module lpu_fu_subsystem_cluster #(
 	assign qctl_done_o = ENABLE_QCTL ? qctl_endpoint_done : '1;
 	assign started_o = started_q;
 	assign schedule_cycle_o = schedule_cycle_q;
-	assign all_frontends_ready_o = (&mem_frontends_ready) && (&mxm_frontends_ready) &&
+	assign all_frontends_ready_o = (&mem_frontends_ready) && (&mxm_frontends_ready) && (&sxm_frontends_ready) &&
 		(!ENABLE_QCTL || qctl_all_primed) && !frontend_fault_o;
-	assign all_frontends_idle_o = (&mem_frontends_idle) && (&mxm_frontends_idle);
+	assign all_frontends_idle_o = (&mem_frontends_idle) && (&mxm_frontends_idle) && (&sxm_frontends_idle);
 	assign program_start_ready_o = all_frontends_ready_o && !started_q;
-	assign frontend_fault_o = (|mem_frontend_fault) || (|mxm_frontend_fault) ||
+	assign frontend_fault_o = (|mem_frontend_fault) || (|mxm_frontend_fault) || (|sxm_frontend_fault) ||
 		(ENABLE_QCTL && qctl_fault_o);
-	assign frontend_fault_code_o = ((|mem_frontend_fault) || (|mxm_frontend_fault)) ?
+	assign frontend_fault_code_o = ((|mem_frontend_fault) || (|mxm_frontend_fault) || (|sxm_frontend_fault)) ?
 		FAULT_FRONTEND : ((ENABLE_QCTL && qctl_fault_o) ? FAULT_QCTL : FAULT_NONE);
 
 	// The global QCTL Subsystem owns load-time Relay stores and runtime shared resources.
@@ -450,16 +451,28 @@ module lpu_fu_subsystem_cluster #(
 			);
 
 			// SXM instruction loading remains disabled until its local control contract is defined.
-			assign sxm_program_ready_o[HEMISPHERE_INDEX] = 1'b0;
-			assign sxm_program_error_o[HEMISPHERE_INDEX] = 1'b0;
-
-			// The formal cluster bypasses the removed legacy SXM path without changing FU ordering.
-			assign sxm_east_valid = mem_east_valid;
-			assign sxm_east_data = mem_east_data;
-			assign sxm_west_valid = mxm_west_valid;
-			assign sxm_west_data = mxm_west_data;
-			assign sxm_fault = 1'b0;
-			assign sxm_stream_conflict = 1'b0;
+			// The tail Relay writes local CTRL/EXEC calendars; each Hemisphere owns its ROW core.
+			lpu_sxm_native_subsystem #(.T(4)) u_sxm_subsystem (
+				.clk_i, .rst_ni, .program_reset_i,
+				.program_valid_i(sxm_program_valid_i[HEMISPHERE_INDEX]),
+				.program_ready_o(sxm_program_ready_o[HEMISPHERE_INDEX]),
+				.program_error_o(sxm_program_error_o[HEMISPHERE_INDEX]),
+				.program_control_i(outer_program_control_i[HEMISPHERE_INDEX]),
+				.program_destination_i(outer_program_destination_i[HEMISPHERE_INDEX*13+:13]),
+				.program_address_i(outer_program_address_i[HEMISPHERE_INDEX*17+:17]),
+				.program_data_i(outer_program_data_i[HEMISPHERE_INDEX*128+:128]),
+				.program_strb_i(outer_program_strb_i[HEMISPHERE_INDEX*4+:4]),
+				.program_last_i(outer_program_last_i[HEMISPHERE_INDEX]),
+				.run_i(execution_run), .schedule_cycle_i(schedule_cycle_q),
+				.frontend_ready_o(sxm_frontends_ready[HEMISPHERE_INDEX]),
+				.frontend_idle_o(sxm_frontends_idle[HEMISPHERE_INDEX]),
+				.east_inner_valid_i(mem_east_valid), .east_inner_data_i(mem_east_data),
+				.east_outer_valid_o(sxm_east_valid), .east_outer_data_o(sxm_east_data),
+				.west_outer_valid_i(mxm_west_valid), .west_outer_data_i(mxm_west_data),
+				.west_inner_valid_o(sxm_west_valid), .west_inner_data_o(sxm_west_data),
+				.fault_o(sxm_fault), .conflict_o(sxm_stream_conflict)
+			);
+			assign sxm_frontend_fault[HEMISPHERE_INDEX] = sxm_fault;
 			for(genvar local_mxm_gen = 0; local_mxm_gen < 2; local_mxm_gen = local_mxm_gen + 1)begin : gen_mxm
 				localparam integer MXM_INDEX = HEMISPHERE_INDEX*2 + local_mxm_gen;
 				lpu_mxm_subsystem #(

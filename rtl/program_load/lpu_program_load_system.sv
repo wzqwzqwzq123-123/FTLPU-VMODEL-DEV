@@ -83,8 +83,9 @@ module lpu_program_load_system #(
 );
 	import lpu_program_load_pkg::*;
 
-	// The integrated RTL frontend accepts Macro-packed Program Images only.
+	// MEM/MXM use Macro images; SXM CTRL/EXEC use native two-word events.
 	localparam logic [1:0] PROGRAM_ENCODING_MACRO = 2'd0;
+	localparam logic [1:0] PROGRAM_ENCODING_NATIVE = 2'd1;
 	localparam logic [5:0] FRONTEND_FAULT_OFFSET = 6'd16;
 
 	logic [1:0] command_scope_w;
@@ -94,6 +95,8 @@ module lpu_program_load_system #(
 	logic command_target_legal_w;
 	logic program_cmd_write_fire;
 	logic descriptor_illegal_w;
+	logic command_is_sxm_w;
+	logic [1:0] sxm_ctrl_target_seen_q, sxm_exec_target_seen_q;
 	logic descriptor_duplicate_w;
 	logic descriptor_fault_q;
 
@@ -203,6 +206,8 @@ module lpu_program_load_system #(
 			PROGRAM_TARGET_MXM_COMPUTE,
 			PROGRAM_TARGET_MXM_PARAM_LOAD,
 			PROGRAM_TARGET_MXM_BACKEND: command_target_legal_w = command_target_index_w < 8'd2;
+			PROGRAM_TARGET_SXM_TRANSPOSE,
+			PROGRAM_TARGET_SXM_PERMUTE: command_target_legal_w = command_target_index_w == 0;
 			default: command_target_legal_w = 1'b0;
 		endcase
 	end
@@ -234,10 +239,20 @@ module lpu_program_load_system #(
 	assign program_cmd_write_ready_o = loader_program_cmd_write_ready && !load_request_active_q &&
 		!descriptor_fault_q;
 	assign program_cmd_write_fire = program_cmd_write_valid_i && program_cmd_write_ready_o;
+	assign command_is_sxm_w = (command_target_kind_w == PROGRAM_TARGET_SXM_TRANSPOSE) ||
+		(command_target_kind_w == PROGRAM_TARGET_SXM_PERMUTE);
 	assign descriptor_illegal_w = program_cmd_write_fire &&
 		(program_cmd_write_opcode_i == PROGRAM_LOADER_LOAD_IMEM) &&
-		(!command_target_legal_w || (program_cmd_write_encoding_mode_i != PROGRAM_ENCODING_MACRO) ||
+		(!command_target_legal_w || (program_cmd_write_encoding_mode_i !=
+		 (command_is_sxm_w ? PROGRAM_ENCODING_NATIVE : PROGRAM_ENCODING_MACRO)) ||
 		 (program_cmd_write_byte_count_i == 0) ||
+		 (command_is_sxm_w &&
+		  ((program_cmd_write_format_i != PROGRAM_FORMAT_128) ||
+		   (program_cmd_write_byte_count_i % 32 != 0) ||
+		   (program_cmd_write_byte_count_i > 64*32) ||
+		   (program_cmd_write_imem_base_address_i != 0) ||
+		   !program_cmd_write_image_first_i || !program_cmd_write_image_last_i ||
+		   (program_cmd_write_expected_word_count_i != program_cmd_write_byte_count_i / 16))) ||
 		 ((command_target_kind_w == PROGRAM_TARGET_MEM) &&
 		  ((program_cmd_write_format_i != PROGRAM_FORMAT_96) ||
 		   ((program_cmd_write_byte_count_i % 12) != 0) ||
@@ -264,6 +279,10 @@ module lpu_program_load_system #(
 				PROGRAM_TARGET_MXM_COMPUTE: descriptor_duplicate_w = mxm_compute_target_seen_q[command_global_target_w[1:0]];
 				PROGRAM_TARGET_MXM_PARAM_LOAD: descriptor_duplicate_w = mxm_param_load_target_seen_q[command_global_target_w[1:0]];
 				PROGRAM_TARGET_MXM_BACKEND: descriptor_duplicate_w = mxm_backend_target_seen_q[command_global_target_w[1:0]];
+				PROGRAM_TARGET_SXM_TRANSPOSE: descriptor_duplicate_w =
+					sxm_ctrl_target_seen_q[program_cmd_write_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT]];
+				PROGRAM_TARGET_SXM_PERMUTE: descriptor_duplicate_w =
+					sxm_exec_target_seen_q[program_cmd_write_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT]];
 				default: descriptor_duplicate_w = 1'b0;
 			endcase
 		end
@@ -501,6 +520,8 @@ module lpu_program_load_system #(
 			mxm_compute_target_seen_q <= '0;
 			mxm_param_load_target_seen_q <= '0;
 			mxm_backend_target_seen_q <= '0;
+			sxm_ctrl_target_seen_q <= '0;
+			sxm_exec_target_seen_q <= '0;
 		end
 		else if(program_reset_i)begin
 			descriptor_fault_q <= 1'b0;
@@ -510,6 +531,8 @@ module lpu_program_load_system #(
 			mxm_compute_target_seen_q <= '0;
 			mxm_param_load_target_seen_q <= '0;
 			mxm_backend_target_seen_q <= '0;
+			sxm_ctrl_target_seen_q <= '0;
+			sxm_exec_target_seen_q <= '0;
 		end
 		else begin
 			if(descriptor_illegal_w || descriptor_duplicate_w)begin
@@ -524,6 +547,10 @@ module lpu_program_load_system #(
 					PROGRAM_TARGET_MXM_COMPUTE: mxm_compute_target_seen_q[command_global_target_w[1:0]] <= 1'b1;
 					PROGRAM_TARGET_MXM_PARAM_LOAD: mxm_param_load_target_seen_q[command_global_target_w[1:0]] <= 1'b1;
 					PROGRAM_TARGET_MXM_BACKEND: mxm_backend_target_seen_q[command_global_target_w[1:0]] <= 1'b1;
+					PROGRAM_TARGET_SXM_TRANSPOSE: sxm_ctrl_target_seen_q[
+						program_cmd_write_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT]] <= 1'b1;
+					PROGRAM_TARGET_SXM_PERMUTE: sxm_exec_target_seen_q[
+						program_cmd_write_destination_i[PROGRAM_DESTINATION_HEMISPHERE_BIT]] <= 1'b1;
 					default: mem_target_seen_q <= mem_target_seen_q;
 				endcase
 			end
