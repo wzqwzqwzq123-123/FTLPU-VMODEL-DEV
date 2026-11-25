@@ -122,6 +122,26 @@ module lpu_vxm_sequential_decoder #(
 		if(opcode >= 7 && !(QUEUE_ID == 3 || QUEUE_ID == 7))begin
 			legal_o = 1'b0;
 		end
+		// Match the compact producer's semantic checks, including fields that
+		// the native adapter would otherwise ignore on a non-tail Stage.
+		if((control[13] && !tail) || (control[14] && !control[15]) ||
+			(control[51] && (control[15] || QUEUE_ID % 2 == 0)) ||
+			(control[15] && (QUEUE_ID % 2 == 0 || rhs != 3 ||
+			(opcode != 1 && opcode != 5))))begin
+			legal_o = 1'b0;
+		end
+		if(head)begin
+			if(!((lhs == 4) || (lhs == 5) || (lhs == 6) || (lhs == 7) || (lhs == 8)) ||
+				!((rhs == 4) || (rhs == 5) || (rhs == 6) || (rhs == 8)))begin
+				legal_o = 1'b0;
+			end
+		end
+		else begin
+			if(lhs != 0 || !((rhs == 1) || (rhs == 2) || (rhs == 6) ||
+				(rhs == 3 && QUEUE_ID % 2 == 1)))begin
+				legal_o = 1'b0;
+			end
+		end
 		if(nop_o)begin
 			legal_o = (word_i[95:32] == 0) && (nop_cycles_o != 0);
 		end
