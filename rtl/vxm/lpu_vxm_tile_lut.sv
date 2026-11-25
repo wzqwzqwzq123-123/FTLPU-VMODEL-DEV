@@ -3,200 +3,168 @@
 // Programming broadcasts identical contents to the Lane replicas.
 // EXP rows are 26 bits, RECIP/RSQRT rows 32 bits, and Log rows 50 bits.
 module lpu_vxm_tile_lut #(
-  parameter integer FUNCTION_COUNT = 3,
-  parameter integer LANES = 8,
-  parameter integer ENTRY_COUNT = 64,
-  parameter integer STAGE_WIDTH = 4,
-  parameter integer FUNCTION_WIDTH =
-    FUNCTION_COUNT <= 1 ? 1 : $clog2(FUNCTION_COUNT),
-  parameter integer ADDRESS_WIDTH =
-    ENTRY_COUNT <= 1 ? 1 : $clog2(ENTRY_COUNT)
+	parameter integer FUNCTION_COUNT = 3,
+	parameter integer LANES = 8,
+	parameter integer ENTRY_COUNT = 64,
+	parameter integer STAGE_WIDTH = 4,
+	parameter integer FUNCTION_WIDTH = FUNCTION_COUNT <= 1 ? 1 : $clog2(FUNCTION_COUNT),
+	parameter integer ADDRESS_WIDTH = ENTRY_COUNT <= 1 ? 1 : $clog2(ENTRY_COUNT)
 ) (
-  input  logic clk_i,
-  input  logic rst_ni,
+	input logic clk_i,
+	input logic rst_ni,
 
-  input  logic                      config_valid_i,
-  input  logic [FUNCTION_WIDTH-1:0] config_function_i,
-  input  logic [15:0]               config_input_min_i,
-  input  logic [15:0]               config_segment_width_i,
-  input  logic                      write_valid_i,
-  input  logic [FUNCTION_WIDTH-1:0] write_function_i,
-  input  logic [ADDRESS_WIDTH-1:0]  write_address_i,
-  input  logic [15:0]               write_k_i,
-  input  logic [15:0]               write_b_i,
-  input  logic [49:0]              write_log_i,
+	input logic config_valid_i,
+	input logic [FUNCTION_WIDTH-1:0] config_function_i,
+	input logic [15:0] config_input_min_i,
+	input logic [15:0] config_segment_width_i,
+	input logic write_valid_i,
+	input logic [FUNCTION_WIDTH-1:0] write_function_i,
+	input logic [ADDRESS_WIDTH-1:0] write_address_i,
+	input logic [15:0] write_k_i,
+	input logic [15:0] write_b_i,
+	input logic [49:0] write_log_i,
 
-  input  logic [FUNCTION_COUNT*LANES-1:0]
-    request_valid_i,
-  input  logic [FUNCTION_COUNT*LANES*ADDRESS_WIDTH-1:0]
-    request_address_i,
-  input  logic [FUNCTION_COUNT*LANES*STAGE_WIDTH-1:0]
-    request_stage_i,
-  output logic [FUNCTION_COUNT*LANES-1:0]
-    response_valid_o,
-  output logic [FUNCTION_COUNT*LANES*STAGE_WIDTH-1:0]
-    response_stage_o,
-  output logic [FUNCTION_COUNT*LANES*16-1:0]
-    response_k_o,
-  output logic [FUNCTION_COUNT*LANES*16-1:0]
-    response_b_o,
-  output logic [FUNCTION_COUNT*LANES*50-1:0]
-    response_log_o,
+	input logic [FUNCTION_COUNT*LANES-1:0] request_valid_i,
+	input logic [FUNCTION_COUNT*LANES*ADDRESS_WIDTH-1:0] request_address_i,
+	input logic [FUNCTION_COUNT*LANES*STAGE_WIDTH-1:0] request_stage_i,
+	output logic [FUNCTION_COUNT*LANES-1:0] response_valid_o,
+	output logic [FUNCTION_COUNT*LANES*STAGE_WIDTH-1:0] response_stage_o,
+	output logic [FUNCTION_COUNT*LANES*16-1:0] response_k_o,
+	output logic [FUNCTION_COUNT*LANES*16-1:0] response_b_o,
+	output logic [FUNCTION_COUNT*LANES*50-1:0] response_log_o,
 
-  output logic [FUNCTION_COUNT-1:0] configured_o,
-  output logic [FUNCTION_COUNT*16-1:0] input_min_o,
-  output logic [FUNCTION_COUNT*16-1:0] segment_width_o,
-  output logic fault_o
+	output logic [FUNCTION_COUNT-1:0] configured_o,
+	output logic [FUNCTION_COUNT*16-1:0] input_min_o,
+	output logic [FUNCTION_COUNT*16-1:0] segment_width_o,
+	output logic fault_o
 );
-  localparam integer SRAM_COUNT = FUNCTION_COUNT*LANES;
+	localparam integer SRAM_COUNT = FUNCTION_COUNT * LANES;
 
-  logic [SRAM_COUNT-1:0] sram_request_valid;
-  logic [SRAM_COUNT*ADDRESS_WIDTH-1:0] sram_request_address;
-  logic [SRAM_COUNT-1:0] sram_response_valid;
-  logic [SRAM_COUNT*16-1:0] sram_response_k;
-  logic [SRAM_COUNT*16-1:0] sram_response_b;
-  logic [SRAM_COUNT*50-1:0] sram_response_log;
-  logic [SRAM_COUNT-1:0] sram_configured;
-  logic [SRAM_COUNT*16-1:0] sram_input_min;
-  logic [SRAM_COUNT*16-1:0] sram_segment_width;
-  logic [SRAM_COUNT-1:0] sram_fault;
-  logic [SRAM_COUNT*STAGE_WIDTH-1:0] response_stage_q;
-  logic [SRAM_COUNT-1:0] response_tag_valid_q;
+	logic [SRAM_COUNT-1:0] sram_request_valid;
+	logic [SRAM_COUNT*ADDRESS_WIDTH-1:0] sram_request_address;
+	logic [SRAM_COUNT-1:0] sram_response_valid;
+	logic [SRAM_COUNT*16-1:0] sram_response_k;
+	logic [SRAM_COUNT*16-1:0] sram_response_b;
+	logic [SRAM_COUNT*50-1:0] sram_response_log;
+	logic [SRAM_COUNT-1:0] sram_configured;
+	logic [SRAM_COUNT*16-1:0] sram_input_min;
+	logic [SRAM_COUNT*16-1:0] sram_segment_width;
+	logic [SRAM_COUNT-1:0] sram_fault;
+	// Saved physical ALU Stage for each {function,Lane} port; returned one cycle after its SRAM request.
+	logic [SRAM_COUNT*STAGE_WIDTH-1:0] response_stage_q;
+	logic [SRAM_COUNT-1:0] response_tag_valid_q;
 
-  always_comb begin
-    sram_request_valid = '0;
-    sram_request_address = '0;
-    for (integer function_id = 0;
-         function_id < FUNCTION_COUNT; function_id++) begin
-      configured_o[function_id] =
-        sram_configured[function_id*LANES];
-      input_min_o[function_id*16 +: 16] =
-        sram_input_min[(function_id*LANES)*16 +: 16];
-      segment_width_o[function_id*16 +: 16] =
-        sram_segment_width[(function_id*LANES)*16 +: 16];
-      for (integer lane = 0; lane < LANES; lane++) begin
-        integer sram_index;
-        sram_index = function_id*LANES + lane;
-        sram_request_valid[sram_index] = request_valid_i[sram_index];
-        sram_request_address[sram_index*ADDRESS_WIDTH +: ADDRESS_WIDTH] =
-          request_address_i[sram_index*ADDRESS_WIDTH +: ADDRESS_WIDTH];
-      end
-    end
+	// Route per-function/Lane requests and match synchronous SRAM returns to their saved physical Stage tags.
+	always_comb begin
+		sram_request_valid = '0;
+		sram_request_address = '0;
+		// function_id selects EXP/RECIP/RSQRT/optional Log; Lane zero represents each identically programmed function's configuration.
+		for (integer function_id = 0; function_id < FUNCTION_COUNT; function_id++)begin
+			configured_o[function_id] = sram_configured[function_id*LANES];
+			input_min_o[function_id*16+:16] = sram_input_min[(function_id*LANES)*16+:16];
+			segment_width_o[function_id*16+:16] = sram_segment_width[(function_id*LANES)*16+:16];
+			// lane is the vector element [0,LANES-1]; sram_index=function_id*LANES+lane selects one private SRAM.
+			for (integer lane = 0; lane < LANES; lane++)begin
+				integer sram_index;
+				sram_index = function_id * LANES + lane;
+				sram_request_valid[sram_index] = request_valid_i[sram_index];
+				sram_request_address[sram_index*ADDRESS_WIDTH+:ADDRESS_WIDTH] = request_address_i[sram_index*ADDRESS_WIDTH+:ADDRESS_WIDTH];
+			end
+		end
 
-    response_valid_o = '0;
-    response_stage_o = '0;
-    response_k_o = '0;
-    response_b_o = '0;
-    response_log_o = '0;
-    for (integer sram_index = 0;
-         sram_index < SRAM_COUNT; sram_index++) begin
-      integer response_index;
-      response_index = sram_index;
-      if (sram_response_valid[sram_index] &&
-          response_tag_valid_q[sram_index]) begin
-        response_valid_o[response_index] = 1'b1;
-        response_stage_o[
-          response_index*STAGE_WIDTH +: STAGE_WIDTH] =
-          response_stage_q[
-            sram_index*STAGE_WIDTH +: STAGE_WIDTH];
-        response_k_o[response_index*16 +: 16] =
-          sram_response_k[sram_index*16 +: 16];
-        response_b_o[response_index*16 +: 16] =
-          sram_response_b[sram_index*16 +: 16];
-        response_log_o[response_index*50 +: 50] =
-          sram_response_log[sram_index*50 +: 50];
-      end
-    end
-  end
+		response_valid_o = '0;
+		response_stage_o = '0;
+		response_k_o = '0;
+		response_b_o = '0;
+		response_log_o = '0;
+		// sram_index scans {function,Lane}; response_index preserves that coordinate and restores its physical Stage tag.
+		for (integer sram_index = 0; sram_index < SRAM_COUNT; sram_index++)begin
+			integer response_index;
+			response_index = sram_index;
+			if(sram_response_valid[sram_index] && response_tag_valid_q[sram_index])begin
+				response_valid_o[response_index] = 1'b1;
+				response_stage_o[response_index*STAGE_WIDTH+:STAGE_WIDTH] = response_stage_q[sram_index*STAGE_WIDTH+:STAGE_WIDTH];
+				response_k_o[response_index*16+:16] = sram_response_k[sram_index*16+:16];
+				response_b_o[response_index*16+:16] = sram_response_b[sram_index*16+:16];
+				response_log_o[response_index*50+:50] = sram_response_log[sram_index*50+:50];
+			end
+		end
+	end
 
-  genvar function_index;
-  genvar lane_index;
-  generate
-    for (function_index = 0; function_index < FUNCTION_COUNT;
-         function_index++) begin : g_function
-      for (lane_index = 0; lane_index < LANES;
-           lane_index++) begin : g_lane_sram
-        localparam integer SRAM_INDEX = function_index*LANES + lane_index;
-        localparam integer COEFFICIENT_WIDTH =
-          function_index == 0 ? 13 : (function_index == 3 ? 25 : 16);
-        logic [COEFFICIENT_WIDTH-1:0] coefficient_k;
-        logic [COEFFICIENT_WIDTH-1:0] coefficient_b;
+	genvar function_index;
+	genvar lane_index;
+	generate
+		// function_index elaborates one LUT function bank, not another execution Stage.
+		for (function_index = 0; function_index < FUNCTION_COUNT; function_index++)begin : g_function
+			// lane_index elaborates its private Lane SRAM; flat SRAM_INDEX=function_index*LANES+lane_index.
+			for (lane_index = 0; lane_index < LANES; lane_index++)begin : g_lane_sram
+				localparam integer SRAM_INDEX = function_index * LANES + lane_index;
+				localparam integer COEFFICIENT_WIDTH = function_index == 0 ? 13 : (function_index == 3 ? 25 : 16);
+				logic [COEFFICIENT_WIDTH-1:0] coefficient_k;
+				logic [COEFFICIENT_WIDTH-1:0] coefficient_b;
 
-        if (function_index == 3) begin : g_log_row
-          assign sram_response_k[SRAM_INDEX*16 +: 16] = '0;
-          assign sram_response_b[SRAM_INDEX*16 +: 16] = '0;
-          assign sram_response_log[SRAM_INDEX*50 +: 50] =
-            {coefficient_k, coefficient_b};
-        end else begin : g_legacy_row
-          assign sram_response_k[SRAM_INDEX*16 +: 16] =
-            {{(16-COEFFICIENT_WIDTH){1'b0}}, coefficient_k};
-          assign sram_response_b[SRAM_INDEX*16 +: 16] =
-            {{(16-COEFFICIENT_WIDTH){1'b0}}, coefficient_b};
-          assign sram_response_log[SRAM_INDEX*50 +: 50] = '0;
-        end
+				if(function_index == 3)begin : g_log_row
+					assign sram_response_k[SRAM_INDEX*16+:16] = '0;
+					assign sram_response_b[SRAM_INDEX*16+:16] = '0;
+					assign sram_response_log[SRAM_INDEX*50+:50] = {coefficient_k, coefficient_b};
+				end
+				// Active EXP/RECIP/RSQRT rows use k/b fields; this label does not instantiate a retired VXM datapath.
+				else begin : g_legacy_row
+					assign sram_response_k[SRAM_INDEX*16+:16] = {{(16 - COEFFICIENT_WIDTH) {1'b0}}, coefficient_k};
+					assign sram_response_b[SRAM_INDEX*16+:16] = {{(16 - COEFFICIENT_WIDTH) {1'b0}}, coefficient_b};
+					assign sram_response_log[SRAM_INDEX*50+:50] = '0;
+				end
 
-        lpu_vxm_lut_sram #(
-          .ENTRY_COUNT(ENTRY_COUNT),
-          .COEFFICIENT_WIDTH(COEFFICIENT_WIDTH),
-          .ADDRESS_WIDTH(ADDRESS_WIDTH)
-        ) u_sram (
-          .clk_i,
-          .rst_ni,
-          .config_valid_i(config_valid_i &&
-            (config_function_i == function_index)),
-          .config_input_min_i,
-          .config_segment_width_i,
-          .write_valid_i(write_valid_i &&
-            (write_function_i == function_index) &&
-            ((function_index == 0 &&
-              !(|write_k_i[15:13]) && !(|write_b_i[15:13])) ||
-             (function_index > 0))),
-          .write_address_i,
-          .write_k_i(function_index == 3 ?
-            COEFFICIENT_WIDTH'(write_log_i[49:25]) : COEFFICIENT_WIDTH'(write_k_i)),
-          .write_b_i(function_index == 3 ?
-            COEFFICIENT_WIDTH'(write_log_i[24:0]) : COEFFICIENT_WIDTH'(write_b_i)),
-          .read_valid_i(sram_request_valid[SRAM_INDEX]),
-          .read_address_i(sram_request_address[
-            SRAM_INDEX*ADDRESS_WIDTH +: ADDRESS_WIDTH]),
-          .read_valid_o(sram_response_valid[SRAM_INDEX]),
-          .read_k_o(coefficient_k),
-          .read_b_o(coefficient_b),
-          .configured_o(sram_configured[SRAM_INDEX]),
-          .input_min_o(sram_input_min[SRAM_INDEX*16 +: 16]),
-          .segment_width_o(
-            sram_segment_width[SRAM_INDEX*16 +: 16]),
-          .fault_o(sram_fault[SRAM_INDEX])
-        );
-      end
-    end
-  endgenerate
+				lpu_vxm_lut_sram #(
+					.ENTRY_COUNT(ENTRY_COUNT),
+					.COEFFICIENT_WIDTH(COEFFICIENT_WIDTH),
+					.ADDRESS_WIDTH(ADDRESS_WIDTH)
+				) u_sram (
+					.clk_i,
+					.rst_ni,
+					.config_valid_i(config_valid_i && (config_function_i == function_index)),
+					.config_input_min_i,
+					.config_segment_width_i,
+					.write_valid_i(write_valid_i && (write_function_i == function_index) && ((function_index == 0 && !(|write_k_i[15:13]) && !(|write_b_i[15:13])) || (function_index > 0))),
+					.write_address_i,
+					.write_k_i(function_index == 3 ? COEFFICIENT_WIDTH'(write_log_i[49:25]) : COEFFICIENT_WIDTH'(write_k_i)),
+					.write_b_i(function_index == 3 ? COEFFICIENT_WIDTH'(write_log_i[24:0]) : COEFFICIENT_WIDTH'(write_b_i)),
+					.read_valid_i(sram_request_valid[SRAM_INDEX]),
+					.read_address_i(sram_request_address[SRAM_INDEX*ADDRESS_WIDTH+:ADDRESS_WIDTH]),
+					.read_valid_o(sram_response_valid[SRAM_INDEX]),
+					.read_k_o(coefficient_k),
+					.read_b_o(coefficient_b),
+					.configured_o(sram_configured[SRAM_INDEX]),
+					.input_min_o(sram_input_min[SRAM_INDEX*16+:16]),
+					.segment_width_o(sram_segment_width[SRAM_INDEX*16+:16]),
+					.fault_o(sram_fault[SRAM_INDEX])
+				);
+			end
+		end
+	endgenerate
 
-  always_ff @(posedge clk_i or negedge rst_ni) begin
-    if (!rst_ni) begin
-      response_stage_q <= '0;
-      response_tag_valid_q <= '0;
-      fault_o <= 1'b0;
-    end else begin
-      response_tag_valid_q <= sram_request_valid;
-      fault_o <= (|sram_fault) ||
-        (config_valid_i && (config_function_i >= FUNCTION_COUNT)) ||
-        (write_valid_i && (write_function_i >= FUNCTION_COUNT)) ||
-        (write_valid_i && (write_function_i == 0) &&
-         ((|write_k_i[15:13]) || (|write_b_i[15:13])));
-      for (integer sram_index = 0;
-           sram_index < SRAM_COUNT; sram_index++) begin
-        if (sram_request_valid[sram_index]) begin
-          response_stage_q[sram_index*STAGE_WIDTH +: STAGE_WIDTH] <=
-            request_stage_i[sram_index*STAGE_WIDTH +: STAGE_WIDTH];
-        end
-      end
-    end
-  end
+	// Register one-cycle SRAM response tags and report programming or memory-service faults.
+	always_ff @(posedge clk_i or negedge rst_ni) begin
+		if(!rst_ni)begin
+			response_stage_q <= '0;
+			response_tag_valid_q <= '0;
+			fault_o <= 1'b0;
+		end
+		else begin
+			response_tag_valid_q <= sram_request_valid;
+			fault_o <= (|sram_fault) || (config_valid_i && (config_function_i >= FUNCTION_COUNT)) || (write_valid_i && (write_function_i >= FUNCTION_COUNT)) || (write_valid_i && (write_function_i == 0) && ((|write_k_i[15:13]) || (|write_b_i[15:13])));
+			// sram_index scans private {function,Lane} ports and captures the requesting Stage alongside each read.
+			for (integer sram_index = 0; sram_index < SRAM_COUNT; sram_index++)begin
+				if(sram_request_valid[sram_index])begin
+					response_stage_q[sram_index*STAGE_WIDTH+:STAGE_WIDTH] <= request_stage_i[sram_index*STAGE_WIDTH+:STAGE_WIDTH];
+				end
+			end
+		end
+	end
 
-  initial begin
-    if (((FUNCTION_COUNT != 3) && (FUNCTION_COUNT != 4)) ||
-        ((LANES != 1) && (LANES != lpu_pkg::LANES_PER_TILE)))
-      $error("VXM Tile LUT requires three/four functions and 1 or 8 Lanes");
-  end
+	initial begin
+		if(((FUNCTION_COUNT != 3) && (FUNCTION_COUNT != 4)) || ((LANES != 1) && (LANES != lpu_pkg::LANES_PER_TILE)))begin
+			$error("VXM Tile LUT requires three/four functions and 1 or 8 Lanes");
+		end
+	end
 endmodule
