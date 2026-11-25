@@ -1,7 +1,8 @@
-// Standalone resident-configuration/Repeat controller; not yet connected to the subsystem Program endpoint.
+// Own one resident configuration and all accepted Execute iterations.
 module lpu_vxm_instruction_controller #(
 	parameter integer REPEAT_COUNT_WIDTH = 10,
-	parameter integer REPEAT_INTERVAL_WIDTH = 8
+	parameter integer REPEAT_INTERVAL_WIDTH = 8,
+	parameter bit SEQUENTIAL_PHASE = 1'b0
 ) (
 	input logic clk_i,
 	input logic rst_ni,
@@ -12,10 +13,15 @@ module lpu_vxm_instruction_controller #(
 	input logic [lpu_pkg::VXM_LOCAL_QUEUE_COUNT-1:0] command_local_active_i,
 	input logic [lpu_pkg::VXM_LOCAL_QUEUE_COUNT* lpu_pkg::VXM_LOCAL_MAX_INSTRUCTION_WIDTH-1:0] command_local_instruction_i,
 	input logic [lpu_pkg::VXM_GLOBAL_CONFIG_WIDTH-1:0] command_global_config_i,
+	// Total Execute iterations, including the first; zero is rejected rather than interpreted as an empty command.
 	input logic [REPEAT_COUNT_WIDTH-1:0] command_repeat_count_i,
+	// Minimum clock-cycle spacing between accepted Execute tokens; 0/1 allow consecutive-cycle acceptance.
 	input logic [REPEAT_INTERVAL_WIDTH-1:0] command_repeat_interval_i,
 	input logic command_accumulator_enable_i,
 	input logic command_output_enable_i,
+	// Sequential compact flags describe every repeated operation. They are not
+	// automatically changed into one reduction's first/final-iteration flags.
+	input logic [3:0] command_repeat_phase_i,
 
 	// Configuration load is held until the Tile is completely quiescent.
 	output logic local_config_load_o,
@@ -52,11 +58,14 @@ module lpu_vxm_instruction_controller #(
 	logic [VXM_GLOBAL_CONFIG_WIDTH-1:0] global_config_q;
 	// remaining_q includes the next accepted Execute; cooldown_q counts clock cycles before another may be offered.
 	logic [REPEAT_COUNT_WIDTH-1:0] remaining_q;
+	// Retained requested spacing in clock cycles; ready backpressure can lengthen the actual acceptance interval.
 	logic [REPEAT_INTERVAL_WIDTH-1:0] interval_q;
 	logic [REPEAT_INTERVAL_WIDTH-1:0] cooldown_q;
 	logic accumulator_enable_q;
 	logic output_enable_q;
+	// True until the first Execute token is accepted, so only that iteration requests accumulator initialization.
 	logic first_iteration_q;
+	logic [3:0] sequential_phase_q;
 
 	// Drive resident configuration, Execute-token status and repeat metadata from the controller state.
 	always_comb begin
@@ -74,6 +83,9 @@ module lpu_vxm_instruction_controller #(
 		repeat_control_o[VXM_REPEAT_FIRST_ITERATION_BIT] = first_iteration_q;
 		repeat_control_o[VXM_REPEAT_ACCUMULATOR_BIT] = accumulator_enable_q;
 		repeat_control_o[VXM_REPEAT_OUTPUT_ENABLE_BIT] = output_enable_q;
+		if(SEQUENTIAL_PHASE)begin
+			repeat_control_o = sequential_phase_q;
+		end
 	end
 
 	// Run the resident-configuration lifecycle atomically: capture one command,
@@ -90,6 +102,7 @@ module lpu_vxm_instruction_controller #(
 			accumulator_enable_q <= 1'b0;
 			output_enable_q <= 1'b0;
 			first_iteration_q <= 1'b0;
+			sequential_phase_q <= '0;
 			done_o <= 1'b0;
 			fault_o <= 1'b0;
 		end
@@ -112,6 +125,7 @@ module lpu_vxm_instruction_controller #(
 							accumulator_enable_q <= command_accumulator_enable_i;
 							output_enable_q <= command_output_enable_i;
 							first_iteration_q <= 1'b1;
+							sequential_phase_q <= command_repeat_phase_i;
 							state_q <= STATE_LOAD;
 						end
 					end

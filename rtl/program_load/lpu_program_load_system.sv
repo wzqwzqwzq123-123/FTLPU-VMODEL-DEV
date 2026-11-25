@@ -6,6 +6,7 @@ module lpu_program_load_system #(
 	parameter integer DMA_DATA_WIDTH = 256,
 	parameter integer MEM_IMEM_DEPTH = 131072,
 	parameter integer MXM_IMEM_DEPTH = 65536,
+	parameter integer VXM_IMEM_DEPTH = 256,
 	parameter integer COMMAND_ADDRESS_WIDTH = COMMAND_DEPTH <= 1 ? 1 : $clog2(COMMAND_DEPTH)
 ) (
 	input logic clk_i,
@@ -97,6 +98,7 @@ module lpu_program_load_system #(
 	logic descriptor_illegal_w;
 	logic command_is_sxm_w;
 	logic [1:0] sxm_ctrl_target_seen_q, sxm_exec_target_seen_q;
+	logic [7:0] vxm_target_seen_q;
 	logic descriptor_duplicate_w;
 	logic descriptor_fault_q;
 
@@ -206,6 +208,7 @@ module lpu_program_load_system #(
 			PROGRAM_TARGET_MXM_COMPUTE,
 			PROGRAM_TARGET_MXM_PARAM_LOAD,
 			PROGRAM_TARGET_MXM_BACKEND: command_target_legal_w = command_target_index_w < 8'd2;
+			PROGRAM_TARGET_VXM: command_target_legal_w = command_target_index_w < 8;
 			PROGRAM_TARGET_SXM_TRANSPOSE,
 			PROGRAM_TARGET_SXM_PERMUTE: command_target_legal_w = command_target_index_w == 0;
 			default: command_target_legal_w = 1'b0;
@@ -244,7 +247,7 @@ module lpu_program_load_system #(
 	assign descriptor_illegal_w = program_cmd_write_fire &&
 		(program_cmd_write_opcode_i == PROGRAM_LOADER_LOAD_IMEM) &&
 		(!command_target_legal_w || (program_cmd_write_encoding_mode_i !=
-		 (command_is_sxm_w ? PROGRAM_ENCODING_NATIVE : PROGRAM_ENCODING_MACRO)) ||
+		 ((command_is_sxm_w || command_target_kind_w == PROGRAM_TARGET_VXM) ? PROGRAM_ENCODING_NATIVE : PROGRAM_ENCODING_MACRO)) ||
 		 (program_cmd_write_byte_count_i == 0) ||
 		 (command_is_sxm_w &&
 		  ((program_cmd_write_format_i != PROGRAM_FORMAT_128) ||
@@ -253,6 +256,12 @@ module lpu_program_load_system #(
 		   (program_cmd_write_imem_base_address_i != 0) ||
 		   !program_cmd_write_image_first_i || !program_cmd_write_image_last_i ||
 		   (program_cmd_write_expected_word_count_i != program_cmd_write_byte_count_i / 16))) ||
+		 ((command_target_kind_w == PROGRAM_TARGET_VXM) &&
+		  ((program_cmd_write_format_i != PROGRAM_FORMAT_96) ||
+		   (program_cmd_write_byte_count_i % 12 != 0) ||
+		   (program_cmd_write_expected_word_count_i != program_cmd_write_byte_count_i / 12) ||
+		   ({1'b0, program_cmd_write_imem_base_address_i} + program_cmd_write_expected_word_count_i > VXM_IMEM_DEPTH) ||
+		   !program_cmd_write_image_first_i || !program_cmd_write_image_last_i)) ||
 		 ((command_target_kind_w == PROGRAM_TARGET_MEM) &&
 		  ((program_cmd_write_format_i != PROGRAM_FORMAT_96) ||
 		   ((program_cmd_write_byte_count_i % 12) != 0) ||
@@ -273,6 +282,7 @@ module lpu_program_load_system #(
 		descriptor_duplicate_w = 1'b0;
 		if(program_cmd_write_fire && (program_cmd_write_opcode_i == PROGRAM_LOADER_LOAD_IMEM) && command_target_legal_w)begin
 			case(command_target_kind_w)
+				PROGRAM_TARGET_VXM: descriptor_duplicate_w = vxm_target_seen_q[command_target_index_w[2:0]];
 				PROGRAM_TARGET_MEM: descriptor_duplicate_w = mem_target_seen_q[command_global_target_w];
 				PROGRAM_TARGET_MXM_LOAD: descriptor_duplicate_w = mxm_load_target_seen_q[command_global_target_w[1:0]];
 				PROGRAM_TARGET_MXM_DEQUANT: descriptor_duplicate_w = mxm_dequant_target_seen_q[command_global_target_w[1:0]];
@@ -522,6 +532,7 @@ module lpu_program_load_system #(
 			mxm_backend_target_seen_q <= '0;
 			sxm_ctrl_target_seen_q <= '0;
 			sxm_exec_target_seen_q <= '0;
+			vxm_target_seen_q <= '0;
 		end
 		else if(program_reset_i)begin
 			descriptor_fault_q <= 1'b0;
@@ -533,6 +544,7 @@ module lpu_program_load_system #(
 			mxm_backend_target_seen_q <= '0;
 			sxm_ctrl_target_seen_q <= '0;
 			sxm_exec_target_seen_q <= '0;
+			vxm_target_seen_q <= '0;
 		end
 		else begin
 			if(descriptor_illegal_w || descriptor_duplicate_w)begin
@@ -541,6 +553,7 @@ module lpu_program_load_system #(
 			if(program_cmd_write_fire && (program_cmd_write_opcode_i == PROGRAM_LOADER_LOAD_IMEM) &&
 				command_target_legal_w && !descriptor_illegal_w && !descriptor_duplicate_w)begin
 				case(command_target_kind_w)
+					PROGRAM_TARGET_VXM: vxm_target_seen_q[command_target_index_w[2:0]] <= 1'b1;
 					PROGRAM_TARGET_MEM: mem_target_seen_q[command_global_target_w] <= 1'b1;
 					PROGRAM_TARGET_MXM_LOAD: mxm_load_target_seen_q[command_global_target_w[1:0]] <= 1'b1;
 					PROGRAM_TARGET_MXM_DEQUANT: mxm_dequant_target_seen_q[command_global_target_w[1:0]] <= 1'b1;

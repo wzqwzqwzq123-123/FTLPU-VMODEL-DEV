@@ -1,6 +1,7 @@
 module lpu_fu_subsystem_cluster #(
 	parameter integer MEM_IMEM_DEPTH = 131072,
 	parameter integer MXM_IMEM_DEPTH = 65536,
+	parameter integer VXM_IMEM_DEPTH = 256,
 	parameter integer ACTIVE_CONTEXTS = 4,
 	parameter integer MEM_DEPTH_ROWS = lpu_pkg::SRAM_DEPTH_ROWS,
 	parameter integer ACTIVE_MEM_COLUMNS = 52,
@@ -155,6 +156,7 @@ module lpu_fu_subsystem_cluster #(
 	logic [2*4*32-1:0] vxm_to_mem_east_valid;
 	logic [2*4*32*64-1:0] vxm_to_mem_east_data;
 	logic vxm_stream_conflict;
+	logic vxm_frontend_ready, vxm_frontend_idle;
 	localparam integer QCTL_ENTRY_INDEX_WIDTH = QCTL_QUEUE_ENTRY_LIMIT <= 1 ? 1 : $clog2(QCTL_QUEUE_ENTRY_LIMIT);
 	localparam integer QCTL_ENTRY_COUNT_WIDTH = $clog2(QCTL_QUEUE_ENTRY_LIMIT + 1);
 	localparam integer QCTL_GENERATION_WIDTH = 64;
@@ -192,13 +194,13 @@ module lpu_fu_subsystem_cluster #(
 	assign qctl_done_o = ENABLE_QCTL ? qctl_endpoint_done : '1;
 	assign started_o = started_q;
 	assign schedule_cycle_o = schedule_cycle_q;
-	assign all_frontends_ready_o = (&mem_frontends_ready) && (&mxm_frontends_ready) && (&sxm_frontends_ready) &&
+	assign all_frontends_ready_o = (&mem_frontends_ready) && (&mxm_frontends_ready) && (&sxm_frontends_ready) && vxm_frontend_ready &&
 		(!ENABLE_QCTL || qctl_all_primed) && !frontend_fault_o;
-	assign all_frontends_idle_o = (&mem_frontends_idle) && (&mxm_frontends_idle) && (&sxm_frontends_idle);
+	assign all_frontends_idle_o = (&mem_frontends_idle) && (&mxm_frontends_idle) && (&sxm_frontends_idle) && vxm_frontend_idle;
 	assign program_start_ready_o = all_frontends_ready_o && !started_q;
-	assign frontend_fault_o = (|mem_frontend_fault) || (|mxm_frontend_fault) || (|sxm_frontend_fault) ||
+	assign frontend_fault_o = (|mem_frontend_fault) || (|mxm_frontend_fault) || (|sxm_frontend_fault) || vxm_fault_o ||
 		(ENABLE_QCTL && qctl_fault_o);
-	assign frontend_fault_code_o = ((|mem_frontend_fault) || (|mxm_frontend_fault) || (|sxm_frontend_fault)) ?
+	assign frontend_fault_code_o = ((|mem_frontend_fault) || (|mxm_frontend_fault) || (|sxm_frontend_fault) || vxm_fault_o) ?
 		FAULT_FRONTEND : ((ENABLE_QCTL && qctl_fault_o) ? FAULT_QCTL : FAULT_NONE);
 
 	// The global QCTL Subsystem owns load-time Relay stores and runtime shared resources.
@@ -699,8 +701,14 @@ module lpu_fu_subsystem_cluster #(
 		end
 	endgenerate
 
-	lpu_vxm_subsystem u_vxm_subsystem (
-		.clk_i, .rst_ni, .run_i(execution_run),
+	lpu_vxm_subsystem #(
+		.IMEM_DEPTH(VXM_IMEM_DEPTH)
+	) u_vxm_subsystem (
+		.clk_i,
+		.rst_ni,
+		.program_reset_i,
+		.run_i(execution_run),
+		.schedule_cycle_i(schedule_cycle_q),
 		.program_valid_i(vxm_program_valid_i),
 		.program_ready_o(vxm_program_ready_o),
 		.program_control_i(vxm_program_control_i),
@@ -710,10 +718,9 @@ module lpu_fu_subsystem_cluster #(
 		.program_strb_i(vxm_program_strb_i),
 		.program_last_i(vxm_program_last_i),
 		.program_error_o(vxm_program_error_o),
-		.local_issue_valid_i('0),
-		.local_issue_instruction_i('0),
-		.global_issue_valid_i(1'b0),
-		.global_issue_instruction_i('0),
+		.frontend_ready_o(vxm_frontend_ready),
+		.frontend_idle_o(vxm_frontend_idle),
+		.done_o(),
 		.west_from_mem_valid_i(mem_to_vxm_west_valid),
 		.west_from_mem_data_i(mem_to_vxm_west_data),
 		.external_east_valid_i(mem_east_edge_valid_i),
